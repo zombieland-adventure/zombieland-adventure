@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ACCESO: PROYECTO LÁZARO</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=VT323&display=swap" rel="stylesheet">
+    <style>
+        body { background-color: #050505; color: #33ff00; font-family: 'VT323', monospace; font-size: 1.2rem; }
+        .scanline {
+            width: 100%; height: 100px; z-index: 10; background: linear-gradient(0deg, rgba(0,0,0,0) 0%, rgba(51, 255, 0, 0.2) 50%, rgba(0,0,0,0) 100%);
+            opacity: 0.1; position: absolute; bottom: 100%; animation: scanline 10s linear infinite; pointer-events: none;
+        }
+        @keyframes scanline { 0% { bottom: 100%; } 100% { bottom: -100%; } }
+        .glitch { animation: glitch 1s linear infinite; }
+        @keyframes glitch { 2%, 64% { transform: translate(2px,0) skew(0deg); } 4%, 60% { transform: translate(-2px,0) skew(0deg); } 62% { transform: translate(0,0) skew(5deg); } }
+        
+        .option-btn {
+            border: 1px solid #33ff00; padding: 10px; margin: 5px 0; cursor: pointer; transition: all 0.2s; display: block; width: 100%; text-align: left; background: rgba(0, 20, 0, 0.8);
+        }
+        .option-btn:hover { background: #33ff00; color: #000; }
+        .option-btn.selected { background: #33ff00; color: #000; font-weight: bold; }
+        
+        #pdf-container { display: none; border: 2px dashed #33ff00; padding: 20px; margin-top: 20px; text-align: center; }
+    </style>
+</head>
+<body class="p-4 max-w-2xl mx-auto min-h-screen flex flex-col">
+    <div class="scanline"></div>
+    
+    <header class="border-b-2 border-green-700 pb-4 mb-6">
+        <h1 class="text-4xl glitch">TERMINAL DE ACCESO</h1>
+        <p class="text-sm opacity-70">VERIFICANDO APTITUD DEL SUJETO...</p>
+    </header>
+
+    <main id="quiz-container">
+        <!-- Se rellena con JS -->
+    </main>
+
+    <div id="feedback-modal" class="hidden fixed inset-0 bg-black bg-opacity-90 flex items-center justify-center p-4 z-50">
+        <div class="border-2 border-green-500 p-8 bg-gray-900 text-center max-w-sm w-full">
+            <h2 id="feedback-title" class="text-3xl mb-4">RESULTADOS</h2>
+            <p id="feedback-msg" class="text-xl mb-6">Calculando...</p>
+            <button onclick="closeModal()" class="bg-green-700 text-black px-6 py-2 hover:bg-green-500 w-full font-bold">REINTENTAR</button>
+        </div>
+    </div>
+
+    <!-- PANTALLA DE ÉXITO -->
+    <div id="success-screen" class="hidden text-center">
+        <h2 class="text-5xl text-green-400 mb-4 glitch">ACCESO CONCEDIDO</h2>
+        <p class="mb-8">Bienvenido al Proyecto Lázaro.</p>
+        
+        <div id="pdf-container" style="display:block;">
+            <p class="mb-2 text-xl">[DOCUMENTOS CLASIFICADOS]</p>
+            <div class="bg-green-900 bg-opacity-30 p-4 mb-4">
+                <p>📄 MAPA_ZONA_01.PDF</p>
+                <p>📄 CODIGO_ALFA.PDF</p>
+            </div>
+            <p class="text-sm text-gray-400 mb-4">(Archivos físicos entregados al sujeto)</p>
+            
+            <button onclick="location.href='camara.html'" class="mt-4 border-2 border-green-500 px-6 py-3 hover:bg-green-500 hover:text-black transition-colors w-full">
+                >> INICIAR FASE 2: ESCÁNER
+            </button>
+        </div>
+    </div>
+
+    <script>
+        // --- CONFIGURACIÓN DE PREGUNTAS (EDITA ESTO) ---
+        const questions = [
+            // CULTURA GENERAL (10)
+            { q: "¿Capital de Australia?", a: ["Sídney", "Melbourne", "Canberra", "Perth"], correct: 2 },
+            { q: "¿Elemento químico 'Au'?", a: ["Plata", "Oro", "Cobre", "Aluminio"], correct: 1 },
+            { q: "¿Año llegada a la Luna?", a: ["1969", "1970", "1965", "1959"], correct: 0 },
+            { q: "¿Pintor del Guernica?", a: ["Dalí", "Miró", "Picasso", "Goya"], correct: 2 },
+            { q: "¿Planeta más grande?", a: ["Tierra", "Marte", "Júpiter", "Saturno"], correct: 2 },
+            { q: "¿Moneda de Japón?", a: ["Yuan", "Won", "Yen", "Dólar"], correct: 2 },
+            { q: "¿Hueso más largo?", a: ["Fémur", "Tibia", "Húmero", "Radio"], correct: 0 },
+            { q: "¿Autor del Quijote?", a: ["Lope de Vega", "Cervantes", "Quevedo", "Góngora"], correct: 1 },
+            { q: "¿Rio más largo mundo?", a: ["Nilo", "Amazonas", "Yangtsé", "Misisipi"], correct: 1 },
+            { q: "¿Velocidad de la luz?", a: ["300.000 km/s", "150.000 km/s", "1.000 km/s", "Infinita"], correct: 0 },
+            // HOBBIES (5) - EDITAR LUEGO
+            { q: "¿Golpe básico boxeo?", a: ["Hook", "Jab", "Uppercut", "Cross"], correct: 1 },
+            { q: "¿Virus Resident Evil?", a: ["Virus T", "Virus G", "Las Plagas", "Virus Z"], correct: 0 },
+            { q: "¿Cámara: ISO alto?", a: ["Menos ruido", "Más luz/ruido", "Más oscura", "Menos luz"], correct: 1 },
+            { q: "¿Protagonista Tekken?", a: ["Ryu", "Kazuya", "Scorpion", "Cloud"], correct: 1 },
+            { q: "¿Fórmula del Agua?", a: ["HO2", "H2O", "OH", "H2O2"], correct: 1 }
+        ];
+
+        let userAnswers = new Array(questions.length).fill(null);
+
+        // --- AUDIO SYNTH ---
+        const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        function playBeep(freq = 800, type = 'square', dur = 0.1) {
+            const osc = audioCtx.createOscillator();
+            const gain = audioCtx.createGain();
+            osc.type = type;
+            osc.frequency.setValueAtTime(freq, audioCtx.currentTime);
+            gain.gain.setValueAtTime(0.1, audioCtx.currentTime);
+            gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + dur);
+            osc.connect(gain);
+            gain.connect(audioCtx.destination);
+            osc.start();
+            osc.stop(audioCtx.currentTime + dur);
+        }
+
+        // --- RENDER ---
+        function renderQuiz() {
+            const container = document.getElementById('quiz-container');
+            let html = '';
+            questions.forEach((q, idx) => {
+                html += `<div class="mb-8 border-l-4 border-green-800 pl-4">
+                    <p class="mb-2 text-lg font-bold">[PREGUNTA_0${idx+1}] :: ${q.q}</p>
+                    <div class="grid grid-cols-1 gap-2">`;
+                q.a.forEach((opt, optIdx) => {
+                    html += `<button class="option-btn" id="q${idx}_opt${optIdx}" onclick="selectOption(${idx}, ${optIdx})">
+                        > ${opt}
+                    </button>`;
+                });
+                html += `</div></div>`;
+            });
+            html += `<button onclick="checkAnswers()" class="w-full bg-green-600 text-black font-bold py-4 text-xl hover:bg-green-500 mt-4 mb-12">ENVIAR DATOS</button>`;
+            container.innerHTML = html;
+        }
+
+        function selectOption(qIdx, optIdx) {
+            playBeep(1200, 'sawtooth', 0.05);
+            userAnswers[qIdx] = optIdx;
+            // Visual update
+            const buttons = document.querySelectorAll(`[id^="q${qIdx}_opt"]`);
+            buttons.forEach(b => b.classList.remove('selected'));
+            document.getElementById(`q${qIdx}_opt${optIdx}`).classList.add('selected');
+        }
+
+        function checkAnswers() {
+            // Validar completitud
+            if (userAnswers.includes(null)) {
+                playBeep(150, 'sawtooth', 0.3);
+                alert("ERROR: FORMULARIO INCOMPLETO");
+                return;
+            }
+
+            let correctCount = 0;
+            userAnswers.forEach((ans, idx) => {
+                if (ans === questions[idx].correct) correctCount++;
+            });
+
+            if (correctCount === questions.length) {
+                // WIN
+                playBeep(600, 'square', 0.1); setTimeout(() => playBeep(800, 'square', 0.1), 100); setTimeout(() => playBeep(1200, 'square', 0.4), 200);
+                document.getElementById('quiz-container').style.display = 'none';
+                document.getElementById('success-screen').classList.remove('hidden');
+            } else {
+                // FAIL
+                playBeep(200, 'sawtooth', 0.5);
+                document.getElementById('feedback-title').innerText = "ACCESO DENEGADO";
+                document.getElementById('feedback-title').className = "text-3xl mb-4 text-red-500";
+                document.getElementById('feedback-msg').innerText = `PRECISIÓN: ${correctCount}/${questions.length}`;
+                document.getElementById('feedback-modal').classList.remove('hidden');
+            }
+        }
+
+        function closeModal() {
+            document.getElementById('feedback-modal').classList.add('hidden');
+        }
+
+        renderQuiz();
+    </script>
+</body>
+</html>
