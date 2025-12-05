@@ -1,0 +1,548 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>THE_STONE_ENIGMA</title>
+    <!-- Fuente Monoespaciada -->
+    <link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&display=swap" rel="stylesheet">
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        :root {
+            --shake-x: 0px;
+            --shake-y: 0px;
+        }
+
+        body {
+            background-color: #080808;
+            color: #d4ff00; /* Amarillo/Verde Táctico */
+            font-family: 'Share Tech Mono', monospace;
+            overflow-x: hidden;
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            user-select: none;
+        }
+
+        /* Efecto CRT y Scanlines */
+        body::after {
+            content: " ";
+            display: block;
+            position: absolute;
+            top: 0; left: 0; bottom: 0; right: 0;
+            background: linear-gradient(rgba(18, 16, 16, 0) 50%, rgba(0, 0, 0, 0.25) 50%), linear-gradient(90deg, rgba(255, 0, 0, 0.06), rgba(0, 255, 0, 0.02), rgba(0, 0, 255, 0.06));
+            z-index: 20;
+            background-size: 100% 2px, 3px 100%;
+            pointer-events: none;
+            opacity: 0.6;
+        }
+
+        .viewfinder-border {
+            position: relative;
+            width: 100%;
+            max-width: 600px;
+            aspect-ratio: 4/3;
+            border: 2px solid #333;
+            background: #000;
+            margin-top: 10px;
+            overflow: hidden;
+            box-shadow: 0 0 30px rgba(212, 255, 0, 0.15);
+        }
+
+        /* Contenedor interno que se mueve (Shake) */
+        .shake-layer {
+            width: 100%;
+            height: 100%;
+            will-change: transform;
+            animation: shake-anim 0.05s infinite; 
+            transform: translate(var(--shake-x), var(--shake-y)) scale(1.05);
+        }
+
+        /* La imagen con filtros de Luz y Blur */
+        #target-image {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            transition: filter 0.1s linear; 
+        }
+
+        @keyframes shake-anim {
+            0% { transform: translate(var(--shake-x), var(--shake-y)) scale(1.05); }
+            50% { transform: translate(calc(var(--shake-x) * -1), calc(var(--shake-y) * -1)) scale(1.05); }
+            100% { transform: translate(var(--shake-x), var(--shake-y)) scale(1.05); }
+        }
+
+        /* HUD Overlay */
+        .hud {
+            position: absolute;
+            inset: 0;
+            pointer-events: none;
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            z-index: 10;
+        }
+
+        /* Piloto de asistencia de enfoque */
+        .focus-assist {
+            width: 16px;
+            height: 16px;
+            border-radius: 50%;
+            background-color: #222; /* Apagado */
+            border: 1px solid #444;
+            transition: background-color 0.2s, box-shadow 0.2s;
+        }
+        .focus-near {
+            background-color: #ffd700; /* Amarillo */
+            box-shadow: 0 0 15px #ffd700;
+            animation: blink-led 0.5s infinite alternate;
+        }
+        .focus-locked {
+            background-color: #00ff00; /* Verde */
+            box-shadow: 0 0 15px #00ff00;
+            animation: none;
+        }
+
+        @keyframes blink-led { from { opacity: 0.4; } to { opacity: 1; } }
+
+        /* Inputs (Range Sliders) */
+        input[type=range] {
+            -webkit-appearance: none;
+            width: 100%;
+            background: transparent;
+            margin: 10px 0;
+        }
+        input[type=range]::-webkit-slider-track {
+            width: 100%;
+            height: 2px;
+            cursor: pointer;
+            background: #333;
+        }
+        input[type=range]::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            height: 16px;
+            width: 10px;
+            background: #d4ff00;
+            cursor: pointer;
+            margin-top: -7px;
+            box-shadow: 0 0 10px #d4ff00;
+            border-radius: 2px;
+        }
+
+        /* Botón de Disparo */
+        .shutter-btn {
+            width: 70px;
+            height: 70px;
+            border-radius: 50%;
+            background: transparent;
+            border: 4px solid #d4ff00;
+            position: relative;
+            transition: all 0.2s;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .shutter-btn::after {
+            content: '';
+            width: 50px;
+            height: 50px;
+            background: #d4ff00;
+            border-radius: 50%;
+            opacity: 0.5;
+            transition: opacity 0.2s;
+        }
+        .shutter-btn:hover::after { opacity: 1; }
+        .shutter-btn:active { transform: scale(0.95); }
+        .shutter-btn:disabled { border-color: #444; cursor: not-allowed; }
+        .shutter-btn:disabled::after { background: #444; }
+
+        /* Vidas / Intentos */
+        .life-dot {
+            width: 20px; height: 10px;
+            background: #d4ff00;
+            margin-left: 4px;
+            box-shadow: 0 0 5px #d4ff00;
+        }
+        .life-lost {
+            background: #333;
+            box-shadow: none;
+            border: 1px solid #555;
+        }
+
+        /* Modales */
+        .modal-overlay {
+            position: fixed; top:0; left:0; right:0; bottom:0;
+            background: rgba(0,0,0,0.9);
+            z-index: 50;
+            display: none;
+            align-items: center;
+            justify-content: center;
+            flex-direction: column;
+        }
+    </style>
+</head>
+<body class="p-2" onload="startGameTimer()">
+
+    <!-- Header info -->
+    <header class="w-full max-w-2xl flex justify-between items-end mb-2 border-b border-yellow-900/50 pb-2">
+        <div>
+            <h1 class="text-xl font-bold tracking-widest text-white">THE_STONE_ENIGMA_PROTOCOL</h1>
+            <div class="text-xs text-yellow-600">LINKED: CAM-04 [CRITICAL BATTERY]</div>
+        </div>
+        <div class="text-right flex flex-col items-end">
+            <span class="text-xs mb-1 text-gray-400">INTENTOS (FLASH)</span>
+            <div id="lives-container" class="flex">
+                <div class="life-dot"></div>
+                <div class="life-dot"></div>
+                <div class="life-dot"></div>
+            </div>
+        </div>
+    </header>
+
+    <!-- VISOR -->
+    <div class="viewfinder-border bg-black rounded-lg relative">
+        <!-- HUD Overlay -->
+        <div class="hud">
+            <!-- Top HUD -->
+            <div class="flex justify-between items-start w-full text-xs font-bold">
+                <span class="bg-red-600 text-black px-1 animate-pulse">REC</span>
+                
+                <!-- PILOTO DE ASISTENCIA -->
+                <div class="flex flex-col items-end">
+                    <div id="focus-led" class="focus-assist mb-1"></div>
+                    <span class="text-[10px] text-gray-500 tracking-wider">FOCUS ASSIST</span>
+                </div>
+            </div>
+            
+            <!-- Grid de enfoque central -->
+            <div class="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-16 h-16 border border-yellow-500/30"></div>
+            <div class="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-2 h-2 bg-yellow-500/50 rounded-full"></div>
+
+            <!-- Bottom HUD (Info Batería) -->
+            <div class="w-full flex justify-end pb-2">
+                <!-- Se actualiza por JS -->
+                <span id="battery-display" class="text-yellow-500 text-xs font-bold">BAT 45%</span>
+            </div>
+        </div>
+
+        <!-- Capa de Movimiento (Shake) -->
+        <div class="shake-layer">
+            <!-- IMAGEN DEL JUEGO: Cambia el SRC por tu pista -->
+            <img id="target-image" src="https://images.unsplash.com/photo-1519074069444-1ba4fff66d16?q=80&w=1000&auto=format&fit=crop" alt="Target">
+        </div>
+    </div>
+
+    <!-- PANEL DE CONTROL -->
+    <div class="w-full max-w-2xl mt-4 bg-gray-900/80 p-5 rounded-xl border border-yellow-900/30 backdrop-blur-sm">
+        
+        <!-- Controls Grid -->
+        <div class="grid grid-cols-[1fr_auto] gap-4 items-center mb-6">
+            
+            <!-- Sliders Column (ORDEN CAMBIADO: VO -> ISO -> APERTURA) -->
+            <div class="space-y-6">
+                
+                <!-- 1. VELOCIDAD (SHUTTER) -->
+                <div>
+                    <div class="flex justify-between text-xs mb-1">
+                        <span class="font-bold text-gray-300">VELOCIDAD</span>
+                        <span id="txt-shut" class="text-yellow-400">1/10</span>
+                    </div>
+                    <input type="range" id="shutter" min="10" max="1000" step="10" value="10">
+                </div>
+
+                <!-- 2. ISO -->
+                <div>
+                    <div class="flex justify-between text-xs mb-1">
+                        <span class="font-bold text-gray-300">ISO</span>
+                        <span id="txt-iso" class="text-yellow-400">100</span>
+                    </div>
+                    <input type="range" id="iso" min="100" max="12800" step="100" value="100">
+                </div>
+
+                <!-- 3. APERTURA (APERTURE) -->
+                <div>
+                    <div class="flex justify-between text-xs mb-1">
+                        <span class="font-bold text-gray-300">APERTURA</span>
+                        <span id="txt-ap" class="text-yellow-400">f/1.4</span>
+                    </div>
+                    <input type="range" id="aperture" min="0" max="100" value="0">
+                </div>
+
+            </div>
+
+            <!-- Button Column -->
+            <div class="pl-4 border-l border-gray-700 flex flex-col items-center justify-center h-full">
+                <button id="btn-shoot" class="shutter-btn" onclick="capturePhoto()"></button>
+                <span class="text-[10px] mt-2 text-gray-400 tracking-wider">CAPTURAR</span>
+                <!-- Ajustado el coste a -10s para que sea jugable con 45s iniciales -->
+                <span class="text-[9px] text-red-500">-10% BAT</span>
+            </div>
+
+        </div>
+        
+        <!-- Mensaje de estado -->
+        <div id="feedback-msg" class="text-center text-sm text-red-500 font-bold font-mono h-6 tracking-wide"></div>
+    </div>
+
+    <!-- MODAL WIN (DISEÑO ACTUALIZADO) -->
+    <div id="modal-win" class="modal-overlay">
+        <div class="bg-gray-900 border-2 border-green-500 p-8 max-w-md w-full text-center shadow-[0_0_50px_rgba(0,255,0,0.3)]">
+            <h2 class="text-3xl text-green-500 font-bold mb-4 glitch-text">DATOS EXTRAÍDOS</h2>
+            
+            <div class="text-left bg-black p-4 border border-green-800 mb-6 text-xs font-mono text-green-400 space-y-2">
+                <p>> ANALYZING IMAGE...</p>
+                <p>> EXTRACTING CODE...</p>
+                <p>> [====================] 100%</p>
+                <p class="mt-4 border-t border-green-800 pt-2 text-yellow-500 font-bold text-center text-3xl tracking-widest">4 - 9 - 2 - 1</p>
+            </div>
+
+            <p class="text-gray-300 text-sm mb-6">SE NECESITA EVIDENCIA VISUAL PARA CONTINUAR.</p>
+            
+            <!-- Botón de subir evidencia (Fake upload) -->
+            <label class="block w-full cursor-pointer">
+                <input type="file" class="hidden" onchange="uploadEvidence()">
+                <div class="bg-green-700 hover:bg-green-600 text-white py-3 px-4 rounded font-bold tracking-widest border border-green-500 transition-colors">
+                    [ SUBIR EVIDENCIA ]
+                </div>
+            </label>
+        </div>
+    </div>
+
+    <!-- MODAL LOSE -->
+    <div id="modal-lose" class="modal-overlay">
+        <div class="bg-gray-900 border-2 border-red-600 p-8 max-w-sm text-center shadow-[0_0_50px_rgba(255,0,0,0.3)]">
+            <h2 id="lose-title" class="text-3xl text-red-600 font-bold mb-4">SISTEMA APAGADO</h2>
+            <p id="lose-msg" class="text-gray-400 text-sm mb-6">Batería crítica agotada.</p>
+            <button onclick="location.reload()" class="bg-red-700 hover:bg-red-600 text-white px-6 py-2 rounded text-sm font-bold tracking-widest">REINICIAR SISTEMA</button>
+        </div>
+    </div>
+
+    <script>
+        // --- CONSTANTES ---
+        const TARGET_EV = 1.0; 
+        const EV_TOLERANCE = 0.25; 
+        const SWEET_SPOT_APERTURE_VAL = 50; 
+        const FOCUS_SAFE_ZONE = 5; 
+        const MIN_SHUTTER_FOR_STABLE = 600; 
+
+        const MAX_SHAKE_ALLOWED = 1.5;
+        const MAX_BLUR_ALLOWED = 1.5;
+
+        // --- ENERGÍA ---
+        // INICIO AL 45%
+        let battery = 45.0;
+        const BATTERY_DRAIN_IDLE = 1.0; 
+        const BATTERY_COST_SHOT = 10.0; 
+        
+        let attempts = 3;
+        let isGameOver = false;
+        let gameTimer = null;
+
+        // Elementos DOM
+        const img = document.getElementById('target-image');
+        const root = document.documentElement;
+        const feedback = document.getElementById('feedback-msg');
+        const focusLed = document.getElementById('focus-led');
+        const uiBat = document.getElementById('battery-display');
+        
+        const inShut = document.getElementById('shutter');
+        const inAp = document.getElementById('aperture');
+        const inIso = document.getElementById('iso');
+        
+        const txtShut = document.getElementById('txt-shut');
+        const txtAp = document.getElementById('txt-ap');
+        const txtIso = document.getElementById('txt-iso');
+
+        // --- SISTEMA DE BATERÍA ---
+        function startGameTimer() {
+            if(gameTimer) return;
+            updateBatteryUI(); // Init UI
+            gameTimer = setInterval(() => {
+                if(isGameOver) return;
+                
+                battery -= (BATTERY_DRAIN_IDLE / 10);
+                updateBatteryUI();
+
+                if(battery <= 0) {
+                    loseGame("BATERÍA AGOTADA", "La cámara se ha apagado.");
+                }
+            }, 100);
+        }
+
+        function updateBatteryUI() {
+            if(battery < 0) battery = 0;
+            
+            uiBat.innerText = `BAT ${Math.ceil(battery)}%`;
+
+            if(battery > 50) {
+                uiBat.className = "text-green-500 text-xs font-bold";
+            } else if (battery > 20) {
+                uiBat.className = "text-yellow-500 text-xs font-bold";
+            } else {
+                uiBat.className = "text-red-500 text-xs font-bold animate-pulse";
+            }
+        }
+
+        // --- RENDERIZADO ---
+        function updateCameraEngine() {
+            if(isGameOver) return;
+
+            const valShut = parseInt(inShut.value);
+            const valAp = parseInt(inAp.value);
+            const valIso = parseInt(inIso.value);
+
+            // UI Texto
+            let fStopDisplay = "f/8.0";
+            if (valAp < 10) fStopDisplay = "f/1.4";
+            else if (valAp < 30) fStopDisplay = "f/2.8";
+            else if (valAp < 45) fStopDisplay = "f/5.6";
+            else if (valAp < 65) fStopDisplay = "f/8.0 (SWEET SPOT)";
+            else if (valAp < 85) fStopDisplay = "f/16";
+            else fStopDisplay = "f/22";
+
+            txtShut.innerText = "1/" + valShut;
+            txtAp.innerText = valAp === 50 ? "f/8.0 (ÓPTIMO)" : fStopDisplay.replace(" (SWEET SPOT)", "");
+            txtIso.innerText = valIso;
+
+            // Física de Luz
+            let lightShut = 150 / valShut; 
+            let lightAp = 1 - (valAp / 110); 
+            let lightIso = valIso / 800; 
+            let totalBrightness = lightShut * lightAp * lightIso;
+
+            // Blur y Shake
+            let distFocus = Math.abs(valAp - SWEET_SPOT_APERTURE_VAL); 
+            let blurPx = (distFocus > FOCUS_SAFE_ZONE) ? (distFocus - FOCUS_SAFE_ZONE) / 4 : 0;
+
+            let shakePx = 0;
+            if (valShut < MIN_SHUTTER_FOR_STABLE) {
+                shakePx = (MIN_SHUTTER_FOR_STABLE - valShut) / 40;
+            }
+            
+            root.style.setProperty('--shake-x', shakePx + 'px');
+            root.style.setProperty('--shake-y', shakePx + 'px');
+            img.style.filter = `brightness(${totalBrightness}) blur(${blurPx}px)`;
+
+            updateLed(totalBrightness, shakePx, blurPx);
+
+            return { totalBrightness, shakePx, blurPx };
+        }
+
+        function updateLed(brightness, shake, blur) {
+            const isExposureOk = (brightness > (TARGET_EV - EV_TOLERANCE) && brightness < (TARGET_EV + EV_TOLERANCE));
+            const isStableOk = (shake < MAX_SHAKE_ALLOWED);
+            const isFocusOk = (blur < MAX_BLUR_ALLOWED);
+
+            let score = 0;
+            if (isExposureOk) score++;
+            if (isStableOk) score++;
+            if (isFocusOk) score++;
+
+            if (score === 3) focusLed.className = "focus-assist focus-locked";
+            else if (score >= 2) focusLed.className = "focus-assist focus-near";
+            else focusLed.className = "focus-assist";
+        }
+
+        // --- SISTEMA DE CAPTURA ---
+        function capturePhoto() {
+            if(isGameOver) return;
+
+            battery -= BATTERY_COST_SHOT;
+            updateBatteryUI();
+            
+            if(battery <= 0) {
+                loseGame("BATERÍA AGOTADA", "El flash consumió la energía restante.");
+                return;
+            }
+
+            const stats = updateCameraEngine();
+            const b = stats.totalBrightness;
+            
+            const exposureOk = (b > (TARGET_EV - EV_TOLERANCE) && b < (TARGET_EV + EV_TOLERANCE));
+            const stableOk = (stats.shakePx < MAX_SHAKE_ALLOWED); 
+            const focusOk = (stats.blurPx < MAX_BLUR_ALLOWED); 
+
+            if (exposureOk && stableOk && focusOk) {
+                winGame();
+            } else {
+                let msg = "";
+                if (!exposureOk) {
+                    if (b < TARGET_EV) msg = "ERROR: IMAGEN OSCURA";
+                    else msg = "ERROR: IMAGEN QUEMADA";
+                } else if (!stableOk) {
+                    msg = "ERROR: IMAGEN MOVIDA";
+                } else if (!focusOk) {
+                    msg = "ERROR: DESENFOCADA";
+                }
+                
+                feedback.innerText = msg;
+                feedback.classList.remove('animate-pulse');
+                void feedback.offsetWidth; 
+                feedback.classList.add('animate-pulse');
+
+                takeDamage();
+            }
+        }
+
+        function takeDamage() {
+            attempts--;
+            const dots = document.querySelectorAll('.life-dot');
+            if (attempts < 3) dots[2].classList.add('life-lost');
+            if (attempts < 2) dots[1].classList.add('life-lost');
+            if (attempts < 1) dots[0].classList.add('life-lost');
+
+            document.body.style.backgroundColor = "#300";
+            setTimeout(() => document.body.style.backgroundColor = "#080808", 100);
+
+            if (attempts <= 0) {
+                loseGame("MEMORIA LLENA", "Has gastado todos los intentos.");
+            }
+        }
+
+        function winGame() {
+            isGameOver = true;
+            clearInterval(gameTimer);
+            img.style.filter = "brightness(1) blur(0) contrast(1.1)";
+            root.style.setProperty('--shake-x', '0px');
+            root.style.setProperty('--shake-y', '0px');
+            document.getElementById('btn-shoot').disabled = true;
+            feedback.innerText = "PROCESANDO...";
+            feedback.className = "text-center text-sm text-green-500 font-bold blink";
+            
+            setTimeout(() => {
+                document.getElementById('modal-win').style.display = 'flex';
+            }, 1000);
+        }
+
+        function loseGame(title, message) {
+            isGameOver = true;
+            clearInterval(gameTimer);
+            document.getElementById('lose-title').innerText = title;
+            document.getElementById('lose-msg').innerText = message;
+            document.getElementById('modal-lose').style.display = 'flex';
+        }
+
+        function uploadEvidence() {
+            // Fake upload delay
+            const btn = document.querySelector('label div');
+            btn.innerText = "SUBIENDO... 35%";
+            btn.className = "bg-yellow-700 text-white py-3 px-4 rounded font-bold tracking-widest border border-yellow-500 cursor-wait";
+            
+            setTimeout(() => {
+                window.location.href = 'threat_containment.html';
+            }, 1500);
+        }
+
+        inShut.addEventListener('input', updateCameraEngine);
+        inAp.addEventListener('input', updateCameraEngine);
+        inIso.addEventListener('input', updateCameraEngine);
+
+        updateCameraEngine();
+
+    </script>
+</body>
+</html>
