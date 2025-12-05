@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PROYECTO LÁZARO - ACCESO RESTRINGIDO</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Fuente estilo Terminal -->
+    <link href="https://fonts.googleapis.com/css2?family=VT323&display=swap" rel="stylesheet">
+    <style>
+        body {
+            background-color: #000;
+            color: #33ff00;
+            font-family: 'VT323', monospace;
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            overflow: hidden;
+            user-select: none;
+        }
+
+        /* Efecto CRT (Pantalla vieja) */
+        .scanline {
+            width: 100%;
+            height: 100px;
+            z-index: 10;
+            background: linear-gradient(0deg, rgba(0,0,0,0) 0%, rgba(51, 255, 0, 0.2) 50%, rgba(0,0,0,0) 100%);
+            opacity: 0.1;
+            position: absolute;
+            bottom: 100%;
+            animation: scanline 10s linear infinite;
+            pointer-events: none;
+        }
+        @keyframes scanline {
+            0% { bottom: 100%; }
+            100% { bottom: -100%; }
+        }
+
+        /* Parpadeo del cursor */
+        .cursor {
+            display: inline-block;
+            width: 10px;
+            height: 20px;
+            background-color: #33ff00;
+            animation: blink 1s step-end infinite;
+        }
+        @keyframes blink { 50% { opacity: 0; } }
+
+        /* Botón Glitch */
+        .glitch-btn {
+            position: relative;
+            padding: 15px 40px;
+            font-size: 24px;
+            background: transparent;
+            color: #33ff00;
+            border: 2px solid #33ff00;
+            cursor: pointer;
+            overflow: hidden;
+            transition: all 0.2s;
+            text-transform: uppercase;
+            letter-spacing: 2px;
+            margin-top: 30px;
+            opacity: 0; /* Empieza invisible */
+            animation: fadeIn 1s forwards 3s; /* Aparece a los 3 segundos */
+        }
+        .glitch-btn:hover {
+            background: #33ff00;
+            color: #000;
+            box-shadow: 0 0 20px #33ff00;
+        }
+
+        @keyframes fadeIn { to { opacity: 1; } }
+
+        .logo-container {
+            border: 4px solid #33ff00;
+            padding: 20px;
+            margin-bottom: 20px;
+            box-shadow: 0 0 15px rgba(51, 255, 0, 0.3);
+        }
+
+        .typing-text { min-height: 1.5em; }
+    </style>
+</head>
+<body>
+
+    <div class="scanline"></div>
+
+    <div class="logo-container">
+        <h1 class="text-6xl md:text-8xl font-bold tracking-widest text-center">LAZARUS</h1>
+        <div class="text-center text-sm md:text-xl tracking-[0.5em] mt-2 border-t border-green-700 pt-2">
+            BIO-INITIATIVE
+        </div>
+    </div>
+
+    <div class="max-w-md w-full text-center px-4">
+        <p id="console-text" class="text-xl md:text-2xl typing-text text-left"></p>
+        <span class="cursor"></span>
+    </div>
+
+    <button onclick="startMission()" class="glitch-btn">
+        [ INICIAR AVENTURA ]
+    </button>
+
+    <div class="absolute bottom-4 text-xs text-green-800">
+        SECURE CONNECTION // ENCRYPTED: AES-256
+    </div>
+
+    <script>
+        // Efecto de escritura tipo máquina de escribir
+        const textToType = [
+            "Conectando al servidor...",
+            "Verificando identidad...",
+            "AVISO: Nivel de amenaza Biológico.",
+            "¿Desea proceder con el reclutamiento?"
+        ];
+        
+        const consoleElement = document.getElementById('console-text');
+        let lineIndex = 0;
+        let charIndex = 0;
+        let currentText = "";
+
+        function typeWriter() {
+            if (lineIndex < textToType.length) {
+                if (charIndex < textToType[lineIndex].length) {
+                    currentText += textToType[lineIndex].charAt(charIndex);
+                    consoleElement.innerHTML = currentText.replace(/\n/g, "<br>");
+                    charIndex++;
+                    setTimeout(typeWriter, 50); // Velocidad de escritura
+                } else {
+                    // Fin de línea, esperar y borrar o saltar
+                    currentText += "<br>"; // Salto de línea
+                    charIndex = 0;
+                    lineIndex++;
+                    setTimeout(typeWriter, 300); // Pausa entre líneas
+                }
+            }
+        }
+
+        // Iniciar efecto al cargar
+        window.onload = () => {
+            setTimeout(typeWriter, 500);
+        };
+
+        // Redirección
+        function startMission() {
+            // Efecto de sonido (opcional)
+            const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+            const osc = audioCtx.createOscillator();
+            const g = audioCtx.createGain();
+            osc.type = 'square'; osc.frequency.value = 400;
+            g.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.1);
+            osc.connect(g); g.connect(audioCtx.destination);
+            osc.start(); osc.stop(audioCtx.currentTime + 0.1);
+
+            // Redirigir a la Fase 1 (Asegúrate de que la ruta coincide con tu estructura)
+            // Si está en la carpeta modules:
+            setTimeout(() => {
+                window.location.href = 'modules/sys_access_check.html';
+            }, 200);
+        }
+    </script>
+</body>
+</html>
