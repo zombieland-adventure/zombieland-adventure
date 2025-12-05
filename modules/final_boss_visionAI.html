@@ -1,0 +1,395 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>NEMESIS: FASE FINAL</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- TensorFlow.js (Versiones Estables) -->
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-core@3.11.0/dist/tf-core.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-converter@3.11.0/dist/tf-converter.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-backend-webgl@3.11.0/dist/tf-backend-webgl.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/pose-detection@0.0.6/dist/pose-detection.min.js"></script>
+
+    <style>
+        body { background: #050505; color: #0f0; overflow: hidden; font-family: 'Courier New', monospace; user-select: none; }
+        
+        /* Contenedores */
+        #game-layer { position: relative; width: 100vw; height: 100vh; display: flex; justify-content: center; align-items: center; }
+        video { position: absolute; min-width: 100%; min-height: 100%; width: auto; height: auto; object-fit: cover; opacity: 0.6; transform: scaleX(-1); }
+        canvas { position: absolute; min-width: 100%; min-height: 100%; width: auto; height: auto; object-fit: cover; transform: scaleX(-1); }
+        
+        /* UI HUD */
+        #ui-layer { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; z-index: 20; display: flex; flex-direction: column; justify-content: space-between; padding: 20px; }
+        
+        /* Texto de Acción Gigante */
+        #prompt-container {
+            position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+            text-align: center; width: 100%;
+        }
+        .action-big { font-size: 5rem; font-weight: 900; text-shadow: 0 0 20px #000; display: block; line-height: 1; }
+        .action-sub { font-size: 2rem; font-weight: bold; text-shadow: 0 0 10px #000; display: block; margin-top: 10px; }
+        
+        /* Botón Start */
+        #start-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.9); z-index: 50; display: flex; flex-direction: column; align-items: center; justify-content: center; }
+        button { padding: 15px 40px; font-size: 20px; background: #00cc00; color: white; border: none; font-weight: bold; cursor: pointer; border: 2px solid #fff; transition: transform 0.2s; }
+        button:active { transform: scale(0.95); }
+
+        /* Pantalla Victoria */
+        #win-screen { position: fixed; inset: 0; background: #000; z-index: 60; display: none; flex-direction: column; align-items: center; justify-content: center; }
+        .ko-text { font-size: 8rem; color: #ff0000; font-weight: 900; animation: pulse-ko 1s infinite; text-shadow: 0 0 30px red; }
+        @keyframes pulse-ko { 0% { transform: scale(1); } 50% { transform: scale(1.1); } 100% { transform: scale(1); } }
+        
+        /* Debug */
+        #debug-log { position: absolute; bottom: 5px; left: 5px; font-size: 10px; color: yellow; opacity: 0.7; }
+    </style>
+</head>
+<body>
+
+    <!-- PANTALLA INICIO -->
+    <div id="start-overlay">
+        <h1 class="text-4xl text-green-500 mb-2 font-bold tracking-widest">SISTEMA NEMESIS</h1>
+        <p class="text-gray-400 mb-8">Requiere acceso a cámara y cuerpo completo.</p>
+        <button onclick="initSystem()">INICIAR COMBATE</button>
+    </div>
+
+    <!-- PANTALLA VICTORIA -->
+    <div id="win-screen">
+        <div class="ko-text">K.O.</div>
+        <h2 class="text-white text-2xl mt-4 tracking-widest">NEMESIS ELIMINADO</h2>
+        <p class="text-yellow-500 mt-8 text-xl animate-bounce tracking-widest">HA SOLTADO UN OBJETO...</p>
+    </div>
+
+    <!-- JUEGO -->
+    <div id="game-layer">
+        <video id="video" playsinline></video>
+        <canvas id="output"></canvas>
+    </div>
+
+    <!-- HUD -->
+    <div id="ui-layer" style="display:none;">
+        <!-- Barra Vida -->
+        <div class="w-full max-w-3xl mx-auto">
+            <div class="flex justify-between text-white font-bold text-xl drop-shadow-md">
+                <span class="text-red-500">BOSS: NEMESIS</span>
+                <span id="score-txt">0% DAÑO</span>
+            </div>
+            <div class="w-full h-8 border-4 border-red-900 bg-black mt-1 relative rounded">
+                <div id="hp-bar" class="h-full bg-gradient-to-r from-red-600 to-red-400 transition-all duration-300" style="width: 100%"></div>
+            </div>
+        </div>
+
+        <!-- Instrucciones Centrales -->
+        <div id="prompt-container">
+            <span id="main-action" class="action-big text-white">CALIBRANDO</span>
+            <span id="sub-action" class="action-sub text-yellow-400">ESPERANDO</span>
+        </div>
+
+        <!-- Debug -->
+        <div id="debug-log">Inicializando...</div>
+    </div>
+
+    <script>
+        // --- CONFIGURACIÓN MAESTRA ---
+        const TOTAL_MOVES = 30;       // Número total de golpes para ganar
+        const DODGE_CHANCE = 0.15;    // 15% Probabilidad de esquiva
+        const CALIBRATION_TIME = 150; // Frames para estabilizar calibración
+
+        // --- VARIABLES DE ESTADO ---
+        let detector, video, canvas, ctx;
+        let state = 'INIT'; // INIT, CALIBRATING, PLAYING, WIN
+        let score = 0;
+        let currentOrder = null; // { type: 'JAB', side: 'LEFT' }
+        let isMirror = false; 
+        let isHitProcessing = false; // Bloqueo para evitar doble daño
+        
+        // Historial para velocidad
+        let lastPositions = {}; 
+        let centerReferenceX = 0; 
+
+        // --- AUDIO ---
+        const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        function playTone(type) {
+            if(audioCtx.state === 'suspended') audioCtx.resume();
+            const osc = audioCtx.createOscillator();
+            const g = audioCtx.createGain();
+            
+            if(type === 'hit') { 
+                osc.type = 'square'; osc.frequency.setValueAtTime(150, audioCtx.currentTime);
+                osc.frequency.exponentialRampToValueAtTime(40, audioCtx.currentTime + 0.1);
+                g.gain.setValueAtTime(0.3, audioCtx.currentTime);
+                g.gain.linearRampToValueAtTime(0, audioCtx.currentTime + 0.1);
+                osc.start(); osc.stop(audioCtx.currentTime + 0.1);
+            } else if (type === 'voice') { 
+                osc.type = 'sawtooth'; osc.frequency.setValueAtTime(400, audioCtx.currentTime);
+                g.gain.setValueAtTime(0.1, audioCtx.currentTime);
+                g.gain.linearRampToValueAtTime(0, audioCtx.currentTime + 0.2);
+                osc.start(); osc.stop(audioCtx.currentTime + 0.2);
+            } else if (type === 'calibrated') {
+                osc.type = 'sine'; osc.frequency.setValueAtTime(600, audioCtx.currentTime);
+                osc.frequency.linearRampToValueAtTime(800, audioCtx.currentTime + 0.3);
+                g.gain.setValueAtTime(0.2, audioCtx.currentTime);
+                osc.start(); osc.stop(audioCtx.currentTime + 0.3);
+            }
+            osc.connect(g); g.connect(audioCtx.destination);
+        }
+
+        // --- INICIO ---
+        async function initSystem() {
+            document.getElementById('start-overlay').style.display = 'none';
+            document.getElementById('ui-layer').style.display = 'flex';
+            log("Cargando cámara...");
+
+            try {
+                video = document.getElementById('video');
+                canvas = document.getElementById('output');
+                ctx = canvas.getContext('2d');
+
+                const stream = await navigator.mediaDevices.getUserMedia({ 
+                    video: { facingMode: 'user', width: 640, height: 480 } 
+                });
+                video.srcObject = stream;
+                
+                await new Promise(r => video.onloadedmetadata = () => {
+                    video.play();
+                    canvas.width = video.videoWidth;
+                    canvas.height = video.videoHeight;
+                    r();
+                });
+
+                log("Cargando IA...");
+                const model = poseDetection.SupportedModels.MoveNet;
+                detector = await poseDetection.createDetector(model, { modelType: poseDetection.movenet.modelType.SINGLEPOSE_LIGHTNING });
+                
+                log("IA Lista. Iniciando Calibración...");
+                startCalibration();
+                loop();
+
+            } catch (e) {
+                alert("Error: " + e.message);
+                location.reload();
+            }
+        }
+
+        function log(msg) { document.getElementById('debug-log').innerText = msg; }
+
+        // --- BUCLE PRINCIPAL ---
+        async function loop() {
+            if(state === 'WIN') return;
+
+            const poses = await detector.estimatePoses(video);
+            
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            
+            if (poses.length > 0) {
+                const kp = poses[0].keypoints;
+                // Dibujar esqueleto fino y preciso
+                drawSkeleton(kp);
+                
+                if (state === 'CALIBRATING') processCalibration(kp);
+                else if (state === 'PLAYING') processGameplay(kp);
+            }
+
+            requestAnimationFrame(loop);
+        }
+
+        // --- FASE 1: CALIBRACIÓN ---
+        function startCalibration() {
+            state = 'CALIBRATING';
+            updatePrompt("LEVANTA TU", "MANO DERECHA", "yellow");
+        }
+
+        let calibrationFrames = 0;
+        function processCalibration(kp) {
+            const lW = kp.find(k => k.name === 'left_wrist');
+            const rW = kp.find(k => k.name === 'right_wrist');
+            const nose = kp.find(k => k.name === 'nose');
+
+            if(!lW || !rW || !nose) return;
+
+            const leftIsUp = lW.y < nose.y - 50;
+            const rightIsUp = rW.y < nose.y - 50;
+
+            if (leftIsUp || rightIsUp) {
+                calibrationFrames++;
+                if(calibrationFrames > 30) {
+                    if (leftIsUp) isMirror = true; 
+                    else isMirror = false; 
+
+                    playTone('calibrated');
+                    state = 'PLAYING';
+                    log(`Calibrado. Modo Espejo: ${isMirror}`);
+                    
+                    centerReferenceX = nose.x;
+                    
+                    // Resetear historial para evitar salto de daño inicial
+                    lastPositions = { lx: lW.x, rx: rW.x, ny: nose.y };
+                    
+                    // Pausa de 2 segundos antes del primer golpe para prepararse
+                    updatePrompt("PREPÁRATE", "...", "white");
+                    setTimeout(nextMove, 2000);
+                }
+            } else {
+                calibrationFrames = 0;
+            }
+        }
+
+        // --- FASE 2: JUEGO ---
+        function nextMove() {
+            if(state !== 'PLAYING') return;
+            
+            isHitProcessing = false; // Desbloquear daño para el nuevo movimiento
+
+            const type = Math.random() > DODGE_CHANCE ? 'GOLPE' : 'ESQUIVA';
+            const side = Math.random() > 0.5 ? 'IZQUIERDA' : 'DERECHA';
+
+            let actionName = "JAB";
+            if (type === 'GOLPE' && Math.random() > 0.5) actionName = "GANCHO";
+            if (type === 'ESQUIVA') actionName = "ESQUIVA";
+
+            currentOrder = { type: actionName, side: side };
+
+            let color = "white";
+            if (side === 'IZQUIERDA') color = "#00ffff"; // Cyan
+            else color = "#ff00ff"; // Magenta
+
+            updatePrompt(actionName, side, color);
+            playTone('voice');
+        }
+
+        function processGameplay(kp) {
+            // Mapeo de puntos siempre necesario para actualizar el historial
+            const rawLeft = kp.find(k => k.name === 'left_wrist');
+            const rawRight = kp.find(k => k.name === 'right_wrist');
+            const nose = kp.find(k => k.name === 'nose');
+
+            if(!rawLeft || !rawRight || !nose) return;
+
+            let userLeftWrist, userRightWrist;
+            
+            if (isMirror) {
+                userLeftWrist = rawRight;
+                userRightWrist = rawLeft;
+            } else {
+                userLeftWrist = rawLeft;
+                userRightWrist = rawRight;
+            }
+
+            // CRÍTICO: Calcular velocidad comparando con frame anterior
+            // Si lastPositions está vacío (primer frame), usar posición actual (vel = 0)
+            const prevLx = lastPositions.lx || userLeftWrist.x;
+            const prevRx = lastPositions.rx || userRightWrist.x;
+            const prevNy = lastPositions.ny || nose.y;
+
+            const vxL = Math.abs(userLeftWrist.x - prevLx);
+            const vxR = Math.abs(userRightWrist.x - prevRx);
+            const dxNose = nose.x - centerReferenceX; 
+
+            // Actualizar historial SIEMPRE, haya orden o no.
+            // Esto evita el "teletransporte" y la velocidad fantasma.
+            lastPositions = { lx: userLeftWrist.x, rx: userRightWrist.x, ny: nose.y };
+
+            // Si no hay orden activa o ya hemos procesado el golpe, salir
+            if(!currentOrder || isHitProcessing) return;
+
+            let hit = false;
+            const punchThreshold = 20; 
+            const dodgeThreshold = 50; 
+
+            if (currentOrder.type === 'JAB' || currentOrder.type === 'GANCHO') {
+                if (currentOrder.side === 'IZQUIERDA' && vxL > punchThreshold) hit = true;
+                if (currentOrder.side === 'DERECHA' && vxR > punchThreshold) hit = true;
+            } 
+            else if (currentOrder.type === 'ESQUIVA') {
+                if (currentOrder.side === 'IZQUIERDA') {
+                     if (isMirror && dxNose > dodgeThreshold) hit = true;
+                     if (!isMirror && dxNose < -dodgeThreshold) hit = true;
+                }
+                if (currentOrder.side === 'DERECHA') {
+                     if (isMirror && dxNose < -dodgeThreshold) hit = true;
+                     if (!isMirror && dxNose > dodgeThreshold) hit = true;
+                }
+            }
+
+            if (hit) {
+                isHitProcessing = true; // Bloqueo inmediato para evitar doble daño
+                playTone('hit');
+                score++;
+                updateUI();
+                
+                // Limpiar pantalla
+                document.getElementById('main-action').style.display = 'none';
+                document.getElementById('sub-action').style.display = 'none';
+                
+                if(score >= TOTAL_MOVES) {
+                    doWin();
+                } else {
+                    currentOrder = null; // Quitar orden actual
+                    setTimeout(nextMove, 800);
+                }
+            }
+        }
+
+        // --- UI & WIN ---
+        function updatePrompt(main, sub, color) {
+            const m = document.getElementById('main-action');
+            const s = document.getElementById('sub-action');
+            m.innerText = main;
+            s.innerText = sub;
+            m.style.color = color;
+            m.style.display = 'block';
+            s.style.display = 'block';
+        }
+
+        function updateUI() {
+            const pct = Math.floor((score / TOTAL_MOVES) * 100);
+            document.getElementById('score-txt').innerText = `${pct}% DAÑO`;
+            document.getElementById('hp-bar').style.width = `${100 - pct}%`;
+        }
+
+        function doWin() {
+            state = 'WIN';
+            video.pause();
+            video.srcObject.getTracks().forEach(t => t.stop());
+            
+            document.getElementById('game-layer').style.display = 'none';
+            document.getElementById('ui-layer').style.display = 'none';
+            document.getElementById('win-screen').style.display = 'flex';
+        }
+
+        // --- UTILIDADES GRÁFICAS ---
+        function drawSkeleton(kp) {
+            kp.forEach(p => {
+                if(p.score > 0.4) {
+                    ctx.beginPath();
+                    ctx.arc(p.x, p.y, 5, 0, 2 * Math.PI);
+                    ctx.fillStyle = '#0f0';
+                    ctx.fill();
+                    ctx.strokeStyle = 'black';
+                    ctx.lineWidth = 1;
+                    ctx.stroke();
+                }
+            });
+            connect(kp, 'left_shoulder', 'left_elbow');
+            connect(kp, 'left_elbow', 'left_wrist');
+            connect(kp, 'right_shoulder', 'right_elbow');
+            connect(kp, 'right_elbow', 'right_wrist');
+        }
+
+        function connect(kp, nameA, nameB) {
+            const a = kp.find(k => k.name === nameA);
+            const b = kp.find(k => k.name === nameB);
+            if(a && b && a.score > 0.4 && b.score > 0.4) {
+                ctx.beginPath();
+                ctx.moveTo(a.x, a.y);
+                ctx.lineTo(b.x, b.y);
+                ctx.strokeStyle = 'lime';
+                ctx.lineWidth = 2;
+                ctx.stroke();
+            }
+        }
+    </script>
+</body>
+</html>
