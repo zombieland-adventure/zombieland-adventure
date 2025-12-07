@@ -17,18 +17,19 @@
         
         /* LAYOUT FULLSCREEN REAL */
         #game-layer { 
-            position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; 
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%; 
             z-index: 1; 
         }
         
-        /* Video y Canvas superpuestos y escalados para cubrir todo */
-        video, canvas { 
-            position: absolute; top: 0; left: 0; 
-            width: 100%; height: 100%; 
-            object-fit: cover; /* Clave para que no se deforme */
+        /* El video se usa de fuente pero no se muestra directamente para controlar el escalado en canvas */
+        video { 
+            position: absolute; top: 0; left: 0; width: 1px; height: 1px; opacity: 0; pointer-events: none;
+        }
+        
+        canvas { 
+            display: block; width: 100%; height: 100%; 
             transform: scaleX(-1); /* Espejo */
         }
-        video { opacity: 0.6; }
 
         /* UI HUD */
         #ui-layer { 
@@ -42,7 +43,7 @@
             position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
             text-align: center; width: 100%; text-shadow: 0 0 10px #000;
         }
-        .action-big { font-size: 15vw; font-weight: 900; display: block; line-height: 1; transition: transform 0.1s; }
+        .action-big { font-size: 12vw; font-weight: 900; display: block; line-height: 1; transition: transform 0.1s; }
         .action-sub { font-size: 5vw; font-weight: bold; display: block; margin-top: 10px; color: #fff; }
         
         /* Botón Start */
@@ -55,7 +56,7 @@
         .ko-text { font-size: 25vw; color: #ff0000; font-weight: 900; animation: pulse-ko 1s infinite; text-shadow: 0 0 30px red; line-height: 0.8; }
         @keyframes pulse-ko { 0% { transform: scale(1); } 50% { transform: scale(1.05); } 100% { transform: scale(1); } }
         
-        #debug-log { position: absolute; bottom: 10px; left: 10px; font-size: 12px; color: yellow; background: rgba(0,0,0,0.5); padding: 5px; }
+        #debug-log { position: absolute; bottom: 10px; left: 10px; font-size: 12px; color: yellow; background: rgba(0,0,0,0.5); padding: 5px; text-align: left; }
     </style>
 </head>
 <body>
@@ -106,7 +107,7 @@
     <script>
         // --- CONFIGURACIÓN ---
         const TOTAL_MOVES = 30;       
-        const DODGE_CHANCE = 0.20;    // 20% Probabilidad esquiva
+        const DODGE_CHANCE = 0.20;
         
         // --- ESTADO ---
         let detector, video, canvas, ctx;
@@ -116,12 +117,18 @@
         let isMirror = false; 
         let isHitProcessing = false;
         
+        // Variables de renderizado (Pantalla completa)
+        let renderScale = 1;
+        let renderOffsetX = 0;
+        let renderOffsetY = 0;
+        
         // Historial y Referencias
         let lastPositions = {}; 
         let refPoints = { noseY: 0, shoulderY: 0, shoulderWidth: 0 };
         
-        // Flags para evitar conflictos
-        let punchCooldown = 0; // Si golpeas, no puedes esquivar por un momento
+        // Estado del Gancho (Charge -> Release)
+        let hookCharge = { left: false, right: false };
+        let punchCooldown = 0; 
 
         // --- AUDIO ---
         const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
@@ -157,17 +164,15 @@
                 canvas = document.getElementById('output');
                 ctx = canvas.getContext('2d');
 
-                // Forzamos resolución baja para rendimiento IA, pero CSS la escala
+                // Solicitar cámara (Resolución VGA es suficiente para la IA y más rápida)
                 const stream = await navigator.mediaDevices.getUserMedia({ 
-                    video: { facingMode: 'user', width: {ideal: 640}, height: {ideal: 480} } 
+                    video: { facingMode: 'user', width: 640, height: 480 } 
                 });
                 video.srcObject = stream;
                 
                 await new Promise(r => video.onloadedmetadata = () => {
                     video.play();
-                    // Ajustamos el tamaño interno del canvas al del video para dibujar sobre él correctamente
-                    canvas.width = video.videoWidth;
-                    canvas.height = video.videoHeight;
+                    handleResize(); // Calcular escalado inicial
                     r();
                 });
 
@@ -175,6 +180,7 @@
                 const model = poseDetection.SupportedModels.MoveNet;
                 detector = await poseDetection.createDetector(model, { modelType: poseDetection.movenet.modelType.SINGLEPOSE_LIGHTNING });
                 
+                window.addEventListener('resize', handleResize);
                 log("Calibrando...");
                 startCalibration();
                 loop();
@@ -185,20 +191,49 @@
             }
         }
 
+        function handleResize() {
+            // Ajustar canvas al tamaño de ventana real
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+            
+            // Calcular factor de escala para "object-fit: cover" manual
+            const vidRatio = video.videoWidth / video.videoHeight;
+            const screenRatio = canvas.width / canvas.height;
+            
+            if (screenRatio > vidRatio) {
+                // Pantalla más ancha que video: Ajustar por ancho
+                renderScale = canvas.width / video.videoWidth;
+                renderOffsetX = 0;
+                renderOffsetY = (canvas.height - (video.videoHeight * renderScale)) / 2;
+            } else {
+                // Pantalla más alta que video (Móvil vertical): Ajustar por alto
+                renderScale = canvas.height / video.videoHeight;
+                renderOffsetX = (canvas.width - (video.videoWidth * renderScale)) / 2;
+                renderOffsetY = 0;
+            }
+        }
+
         function log(msg) { document.getElementById('debug-log').innerText = msg; }
 
         // --- BUCLE PRINCIPAL ---
         async function loop() {
             if(state === 'WIN') return;
 
-            const poses = await detector.estimatePoses(video);
-            
-            // Limpiamos canvas
+            // 1. DIBUJAR VIDEO (Escalado manual para llenar pantalla)
             ctx.clearRect(0, 0, canvas.width, canvas.height);
+            ctx.drawImage(video, 
+                0, 0, video.videoWidth, video.videoHeight, // Source
+                renderOffsetX, renderOffsetY, video.videoWidth * renderScale, video.videoHeight * renderScale // Dest
+            );
+
+            // 2. DETECTAR POSE
+            const poses = await detector.estimatePoses(video);
             
             if (poses.length > 0) {
                 const kp = poses[0].keypoints;
-                drawSkeleton(kp); // Feedback visual
+                
+                // Dibujar esqueleto ajustado al escalado
+                drawSkeleton(kp); 
                 
                 if (state === 'CALIBRATING') processCalibration(kp);
                 else if (state === 'PLAYING') processGameplay(kp);
@@ -223,10 +258,10 @@
 
             if(!lW || !rW || !nose || !lS || !rS) return;
 
-            // Guardar referencias corporales
+            // Referencias
             refPoints.noseY = nose.y;
-            refPoints.shoulderY = (lS.y + rS.y) / 2; // Altura media hombros
-            refPoints.shoulderWidth = Math.abs(lS.x - rS.x); // Ancho espalda para calcular distancias relativas
+            refPoints.shoulderY = (lS.y + rS.y) / 2; 
+            refPoints.shoulderWidth = Math.abs(lS.x - rS.x);
 
             const leftIsUp = lW.y < nose.y - 50;
             const rightIsUp = rW.y < nose.y - 50;
@@ -234,14 +269,14 @@
             if (leftIsUp || rightIsUp) {
                 calibrationFrames++;
                 if(calibrationFrames > 40) {
+                    // Detectar espejo
                     if (leftIsUp) isMirror = true; 
                     else isMirror = false; 
 
                     playTone('calibrated');
                     state = 'PLAYING';
-                    log(`Modo Espejo: ${isMirror}. Referencias guardadas.`);
+                    log(`Espejo: ${isMirror}. ¡Listo!`);
                     
-                    // Reset historial
                     lastPositions = { lx: lW.x, rx: rW.x, ny: nose.y };
                     
                     updatePrompt("PREPÁRATE", "...", "white");
@@ -257,40 +292,30 @@
             if(state !== 'PLAYING') return;
             isHitProcessing = false;
 
-            // Probabilidades
             const type = Math.random() > DODGE_CHANCE ? 'GOLPE' : 'ESQUIVA';
             const side = Math.random() > 0.5 ? 'IZQUIERDA' : 'DERECHA';
 
             let actionName = "JAB";
-            // 50/50 entre Jab y Gancho si es golpe
             if (type === 'GOLPE' && Math.random() > 0.5) actionName = "GANCHO";
             if (type === 'ESQUIVA') actionName = "ESQUIVA";
 
             currentOrder = { type: actionName, side: side };
 
-            // Colores UI
             let color = "#fff";
             if (side === 'IZQUIERDA') color = "#00ffff"; // Cyan
             else color = "#ff00ff"; // Magenta
 
-            // Texto Grande
             let mainTxt = actionName;
             let subTxt = side;
-            
-            if(actionName === "ESQUIVA") {
-                mainTxt = "¡ABAJO!";
-                subTxt = "ESQUIVA " + side;
-            }
+            if(actionName === "ESQUIVA") { mainTxt = "¡ABAJO!"; subTxt = "ESQUIVA " + side; }
 
             updatePrompt(mainTxt, subTxt, color);
             playTone('voice');
         }
 
         function processGameplay(kp) {
-            // Cooldown de puñetazo para evitar falsas esquivas
             if (punchCooldown > 0) punchCooldown--;
 
-            // Mapeo
             const rawLeft = kp.find(k => k.name === 'left_wrist');
             const rawRight = kp.find(k => k.name === 'right_wrist');
             const nose = kp.find(k => k.name === 'nose');
@@ -299,60 +324,67 @@
 
             if(!rawLeft || !rawRight || !nose || !lS || !rS) return;
 
-            // Determinar qué muñeca es cual según el espejo
+            // Determinar muñecas reales
             let userLeftWrist, userRightWrist;
             if (isMirror) { userLeftWrist = rawRight; userRightWrist = rawLeft; } 
             else { userLeftWrist = rawLeft; userRightWrist = rawRight; }
 
-            // Cálculos de Velocidad
+            // Velocidades
             const prevLx = lastPositions.lx || userLeftWrist.x;
             const prevRx = lastPositions.rx || userRightWrist.x;
             const vxL = Math.abs(userLeftWrist.x - prevLx);
             const vxR = Math.abs(userRightWrist.x - prevRx);
             
-            // Actualizar historial
             lastPositions = { lx: userLeftWrist.x, rx: userRightWrist.x, ny: nose.y };
 
             if(!currentOrder || isHitProcessing) return;
 
             let hit = false;
             
-            // Altura de referencia (Pecho/Hombros)
-            // Se actualiza suavemente para adaptarse si el usuario se mueve
+            // Actualizar referencia altura hombros suavemente
             refPoints.shoulderY = (refPoints.shoulderY * 0.9) + (((lS.y + rS.y)/2) * 0.1); 
             
-            const punchThreshold = 15; // Velocidad para considerar golpe
+            const punchThreshold = 15; 
             const activeWrist = currentOrder.side === 'IZQUIERDA' ? userLeftWrist : userRightWrist;
             const activeVel = currentOrder.side === 'IZQUIERDA' ? vxL : vxR;
+            
+            // Cargar Ganchos (Charge State)
+            // Si la muñeca baja por debajo del pecho + margen, se carga
+            const chargeLevelY = refPoints.shoulderY + 80;
+            if (userLeftWrist.y > chargeLevelY) hookCharge.left = true;
+            if (userRightWrist.y > chargeLevelY) hookCharge.right = true;
 
             // --- LÓGICA DETECCIÓN ---
 
             if (currentOrder.type === 'JAB') {
-                // JAB: Velocidad alta + Muñeca a la altura del hombro o superior (Y menor)
-                // Se permite un margen pequeño hacia abajo, pero no mucho
-                if (activeVel > punchThreshold && activeWrist.y < (refPoints.shoulderY + 50)) {
+                // JAB: Velocidad alta + Altura ALTA (Cerca de hombros)
+                // Se resetea la carga de gancho si tira un jab
+                if (activeVel > punchThreshold && activeWrist.y < (refPoints.shoulderY + 60)) {
                     hit = true;
-                    punchCooldown = 20; // Bloquear esquiva 20 frames
+                    punchCooldown = 20;
+                    if(currentOrder.side === 'IZQUIERDA') hookCharge.left = false;
+                    else hookCharge.right = false;
                 }
             } 
             else if (currentOrder.type === 'GANCHO') {
-                // GANCHO: Velocidad alta + Muñeca pasa por DEBAJO del pecho significativamente
-                if (activeVel > punchThreshold && activeWrist.y > (refPoints.shoulderY + 60)) {
+                // GANCHO: Movimiento ascendente Y estaba cargado (brazo abajo)
+                // Chequeamos si la muñeca está SUBIENDO (Y actual < Y anterior) con velocidad
+                const isMovingUp = activeWrist.y < (currentOrder.side === 'IZQUIERDA' ? lastPositions.ly_old : lastPositions.ry_old); // Simplificado
+                
+                // Lógica de estado: Tiene que haber estado abajo (charged) y ahora estar subiendo a la altura del hombro
+                let isCharged = currentOrder.side === 'IZQUIERDA' ? hookCharge.left : hookCharge.right;
+                
+                if (isCharged && activeVel > punchThreshold && activeWrist.y < chargeLevelY) {
                     hit = true;
                     punchCooldown = 20;
+                    // Reset charge
+                    if(currentOrder.side === 'IZQUIERDA') hookCharge.left = false;
+                    else hookCharge.right = false;
                 }
             }
             else if (currentOrder.type === 'ESQUIVA') {
-                // ESQUIVA: Solo si no estamos golpeando (punchCooldown == 0)
                 if (punchCooldown === 0) {
-                    // Nariz baja significativamente respecto a la referencia calibrada inicial
-                    // O detectamos que la nariz está muy por debajo de los hombros actuales
-                    const squatThreshold = refPoints.shoulderWidth * 0.5; // Bajar media espalda
-                    
-                    // ¿Nariz más baja que los hombros + margen?
                     if (nose.y > (refPoints.shoulderY + 30)) {
-                        // Comprobar lado (Nariz se desplaza del centro)
-                        // Si espejo: Izq = +X. Si no: Izq = -X.
                         const centerX = (lS.x + rS.x) / 2;
                         const dx = nose.x - centerX;
                         
@@ -362,7 +394,6 @@
                             if ((isMirror && dx < -20) || (!isMirror && dx > 20)) hit = true;
                         }
                         
-                        // Simplificación: Si baja mucho, cuenta como esquiva general para no frustrar
                         if (nose.y > refPoints.shoulderY + 80) hit = true; 
                     }
                 }
@@ -374,10 +405,9 @@
                 score++;
                 updateUI();
                 
-                // Efecto visual en texto
                 const mainAction = document.getElementById('main-action');
                 mainAction.style.transform = "scale(1.5)";
-                mainAction.style.color = "#0f0"; // Verde confirmación
+                mainAction.style.color = "#0f0"; 
                 
                 if(score >= TOTAL_MOVES) {
                     setTimeout(doWin, 500);
@@ -387,7 +417,7 @@
                         currentOrder = null;
                         document.getElementById('main-action').innerText = "";
                         document.getElementById('sub-action').innerText = "";
-                        setTimeout(nextMove, 600); // Pausa ritmo
+                        setTimeout(nextMove, 600);
                     }, 200);
                 }
             }
@@ -412,20 +442,27 @@
         function doWin() {
             state = 'WIN';
             video.pause();
-            // Detener stream para liberar cámara
             if(video.srcObject) video.srcObject.getTracks().forEach(t => t.stop());
-            
             document.getElementById('ui-layer').style.display = 'none';
+            document.getElementById('game-layer').style.display = 'none'; // Ocultar video
             document.getElementById('win-screen').style.display = 'flex';
         }
 
-        // --- DIBUJO ---
+        // --- DIBUJO AJUSTADO ---
         function drawSkeleton(kp) {
-            // Dibujar puntos para referencia visual del usuario
+            // Función auxiliar para transformar coordenadas de video a pantalla
+            function map(pt) {
+                return {
+                    x: (pt.x * renderScale) + renderOffsetX,
+                    y: (pt.y * renderScale) + renderOffsetY
+                };
+            }
+
             kp.forEach(p => {
                 if(p.score > 0.4) {
+                    const mapped = map(p);
                     ctx.beginPath();
-                    ctx.arc(p.x, p.y, 5, 0, 2 * Math.PI); // Puntos pequeños
+                    ctx.arc(mapped.x, mapped.y, 5, 0, 2 * Math.PI); 
                     ctx.fillStyle = '#0f0';
                     ctx.fill();
                 }
@@ -436,8 +473,6 @@
             connect(kp, 'left_elbow', 'left_wrist');
             connect(kp, 'right_shoulder', 'right_elbow');
             connect(kp, 'right_elbow', 'right_wrist');
-            
-            // Dibujar línea de hombros (referencia)
             connect(kp, 'left_shoulder', 'right_shoulder');
         }
 
@@ -445,9 +480,13 @@
             const a = kp.find(k => k.name === nameA);
             const b = kp.find(k => k.name === nameB);
             if(a && b && a.score > 0.4 && b.score > 0.4) {
+                // Mapear coordenadas también para líneas
+                const ma = { x: (a.x * renderScale) + renderOffsetX, y: (a.y * renderScale) + renderOffsetY };
+                const mb = { x: (b.x * renderScale) + renderOffsetX, y: (b.y * renderScale) + renderOffsetY };
+
                 ctx.beginPath();
-                ctx.moveTo(a.x, a.y);
-                ctx.lineTo(b.x, b.y);
+                ctx.moveTo(ma.x, ma.y);
+                ctx.lineTo(mb.x, mb.y);
                 ctx.strokeStyle = 'rgba(0, 255, 0, 0.5)';
                 ctx.lineWidth = 2;
                 ctx.stroke();
