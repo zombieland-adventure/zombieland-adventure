@@ -51,12 +51,16 @@
         button { padding: 20px 50px; font-size: 1.5rem; background: #00cc00; color: white; border: 2px solid white; font-weight: bold; cursor: pointer; border-radius: 10px; margin-top: 20px; }
         button:active { transform: scale(0.95); }
 
-        /* Pantalla Victoria */
-        #win-screen { position: fixed; inset: 0; background: #000; z-index: 60; display: none; flex-direction: column; align-items: center; justify-content: center; text-align: center; }
+        /* Pantallas Finales */
+        #win-screen, #lose-screen { position: fixed; inset: 0; background: #000; z-index: 60; display: none; flex-direction: column; align-items: center; justify-content: center; text-align: center; }
         .ko-text { font-size: 25vw; color: #ff0000; font-weight: 900; animation: pulse-ko 1s infinite; text-shadow: 0 0 30px red; line-height: 0.8; }
         @keyframes pulse-ko { 0% { transform: scale(1); } 50% { transform: scale(1.05); } 100% { transform: scale(1); } }
         
         #debug-log { position: absolute; bottom: 10px; left: 10px; font-size: 12px; color: yellow; background: rgba(0,0,0,0.5); padding: 5px; text-align: left; }
+
+        /* Efecto Daño */
+        .damage-effect { animation: shake 0.3s; box-shadow: inset 0 0 100px red; }
+        @keyframes shake { 0%, 100% { transform: translate(0,0); } 25% { transform: translate(10px,0); } 75% { transform: translate(-10px,0); } }
     </style>
 </head>
 <body>
@@ -76,6 +80,13 @@
         <button onclick="location.href='tomb_treasure.html'" style="margin-top: 40px; background: transparent; border: 1px solid #0f0; color: #0f0;">RECOGER RECOMPENSA</button>
     </div>
 
+    <!-- PANTALLA DERROTA -->
+    <div id="lose-screen">
+        <h2 class="text-red-600 text-4xl md:text-6xl mb-4 font-bold tracking-widest">SISTEMA CRÍTICO</h2>
+        <p class="text-gray-400 mt-4">Has recibido demasiado daño.</p>
+        <button onclick="location.reload()" style="background: red; border-color: red;">REINTENTAR</button>
+    </div>
+
     <!-- JUEGO -->
     <div id="game-layer">
         <video id="video" playsinline></video>
@@ -84,14 +95,28 @@
 
     <!-- HUD -->
     <div id="ui-layer" style="display:none;">
-        <!-- Barra Vida -->
-        <div class="w-full max-w-4xl mx-auto">
-            <div class="flex justify-between text-white font-bold text-xl drop-shadow-md">
-                <span class="text-red-500 text-2xl">BOSS</span>
-                <span id="score-txt">100%</span>
+        <!-- Barras de Vida (Jugador vs Boss) -->
+        <div class="w-full flex justify-between items-start gap-4">
+            
+            <!-- Jugador -->
+            <div class="w-1/3 max-w-sm">
+                <div class="flex justify-between text-white font-bold text-sm md:text-lg drop-shadow-md">
+                    <span class="text-blue-400">JUGADOR</span>
+                </div>
+                <div class="w-full h-4 md:h-6 border-2 border-blue-900 bg-black mt-1 relative rounded">
+                    <div id="player-hp-bar" class="h-full bg-gradient-to-r from-blue-600 to-cyan-400 transition-all duration-300" style="width: 100%"></div>
+                </div>
             </div>
-            <div class="w-full h-6 md:h-10 border-4 border-red-900 bg-black mt-2 relative rounded shadow-lg shadow-red-900/50">
-                <div id="hp-bar" class="h-full bg-gradient-to-r from-red-600 to-red-400 transition-all duration-300" style="width: 100%"></div>
+
+            <!-- Boss -->
+            <div class="w-1/2 max-w-2xl text-right">
+                <div class="flex justify-end text-white font-bold text-xl drop-shadow-md">
+                    <span class="text-red-500 text-2xl mr-2">NEMESIS</span>
+                    <span id="score-txt">100%</span>
+                </div>
+                <div class="w-full h-6 md:h-10 border-4 border-red-900 bg-black mt-2 relative rounded shadow-lg shadow-red-900/50">
+                    <div id="hp-bar" class="h-full bg-gradient-to-r from-red-600 to-red-400 transition-all duration-300" style="width: 100%"></div>
+                </div>
             </div>
         </div>
 
@@ -107,28 +132,31 @@
     <script>
         // --- CONFIGURACIÓN ---
         const TOTAL_MOVES = 30;       
-        const DODGE_CHANCE = 0.20;
+        const DODGE_BASE_CHANCE = 0.25;
+        const PLAYER_MAX_HP = 5; // Fallos permitidos
         
         // --- ESTADO ---
         let detector, video, canvas, ctx;
-        let state = 'INIT';
+        let state = 'INIT'; // INIT, CALIBRATING, GUARD_CHECK, PLAYING, WIN, LOSE
         let score = 0;
+        let playerHP = PLAYER_MAX_HP;
         let currentOrder = null; 
         let isMirror = false; 
         let isHitProcessing = false;
         
-        // Variables de renderizado (Pantalla completa)
+        // Renderizado
         let renderScale = 1;
         let renderOffsetX = 0;
         let renderOffsetY = 0;
         
-        // Historial y Referencias
+        // Referencias Corporales
         let lastPositions = {}; 
         let refPoints = { noseY: 0, shoulderY: 0, shoulderWidth: 0 };
         
-        // Estado del Gancho (Charge -> Release)
+        // Lógica de Juego
         let hookCharge = { left: false, right: false };
         let punchCooldown = 0; 
+        let moveHistory = []; // Pila de últimos movimientos
 
         // --- AUDIO ---
         const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
@@ -146,6 +174,9 @@
                 osc.type = 'sawtooth'; osc.frequency.setValueAtTime(300, t);
                 g.gain.setValueAtTime(0.2, t); g.gain.linearRampToValueAtTime(0, t+0.3);
                 osc.start(t); osc.stop(t+0.3);
+            } else if (type === 'error') {
+                osc.type = 'sawtooth'; osc.frequency.setValueAtTime(100, t); osc.frequency.linearRampToValueAtTime(50, t+0.4);
+                g.gain.setValueAtTime(0.5, t); osc.start(t); osc.stop(t+0.4);
             } else if (type === 'calibrated') {
                 osc.type = 'sine'; osc.frequency.setValueAtTime(440, t); osc.frequency.linearRampToValueAtTime(880, t+0.3);
                 g.gain.setValueAtTime(0.2, t); osc.start(t); osc.stop(t+0.3);
@@ -164,15 +195,14 @@
                 canvas = document.getElementById('output');
                 ctx = canvas.getContext('2d');
 
-                // Solicitar cámara (Resolución VGA es suficiente para la IA y más rápida)
                 const stream = await navigator.mediaDevices.getUserMedia({ 
-                    video: { facingMode: 'user', width: 640, height: 480 } 
+                    video: { facingMode: 'user', width: {ideal: 640}, height: {ideal: 480} } 
                 });
                 video.srcObject = stream;
                 
                 await new Promise(r => video.onloadedmetadata = () => {
                     video.play();
-                    handleResize(); // Calcular escalado inicial
+                    handleResize();
                     r();
                 });
 
@@ -192,21 +222,16 @@
         }
 
         function handleResize() {
-            // Ajustar canvas al tamaño de ventana real
             canvas.width = window.innerWidth;
             canvas.height = window.innerHeight;
-            
-            // Calcular factor de escala para "object-fit: cover" manual
             const vidRatio = video.videoWidth / video.videoHeight;
             const screenRatio = canvas.width / canvas.height;
             
             if (screenRatio > vidRatio) {
-                // Pantalla más ancha que video: Ajustar por ancho
                 renderScale = canvas.width / video.videoWidth;
                 renderOffsetX = 0;
                 renderOffsetY = (canvas.height - (video.videoHeight * renderScale)) / 2;
             } else {
-                // Pantalla más alta que video (Móvil vertical): Ajustar por alto
                 renderScale = canvas.height / video.videoHeight;
                 renderOffsetX = (canvas.width - (video.videoWidth * renderScale)) / 2;
                 renderOffsetY = 0;
@@ -217,32 +242,31 @@
 
         // --- BUCLE PRINCIPAL ---
         async function loop() {
-            if(state === 'WIN') return;
+            if(state === 'WIN' || state === 'LOSE') return;
 
-            // 1. DIBUJAR VIDEO (Escalado manual para llenar pantalla)
+            // Dibujar video
             ctx.clearRect(0, 0, canvas.width, canvas.height);
             ctx.drawImage(video, 
-                0, 0, video.videoWidth, video.videoHeight, // Source
-                renderOffsetX, renderOffsetY, video.videoWidth * renderScale, video.videoHeight * renderScale // Dest
+                0, 0, video.videoWidth, video.videoHeight,
+                renderOffsetX, renderOffsetY, video.videoWidth * renderScale, video.videoHeight * renderScale
             );
 
-            // 2. DETECTAR POSE
+            // Detectar Pose
             const poses = await detector.estimatePoses(video);
             
             if (poses.length > 0) {
                 const kp = poses[0].keypoints;
-                
-                // Dibujar esqueleto ajustado al escalado
                 drawSkeleton(kp); 
                 
                 if (state === 'CALIBRATING') processCalibration(kp);
+                else if (state === 'GUARD_CHECK') processGuardCheck(kp);
                 else if (state === 'PLAYING') processGameplay(kp);
             }
 
             requestAnimationFrame(loop);
         }
 
-        // --- CALIBRACIÓN ---
+        // --- FASE 1: CALIBRACIÓN ---
         function startCalibration() {
             state = 'CALIBRATING';
             updatePrompt("LEVANTA", "MANO DERECHA", "yellow");
@@ -258,7 +282,6 @@
 
             if(!lW || !rW || !nose || !lS || !rS) return;
 
-            // Referencias
             refPoints.noseY = nose.y;
             refPoints.shoulderY = (lS.y + rS.y) / 2; 
             refPoints.shoulderWidth = Math.abs(lS.x - rS.x);
@@ -269,41 +292,85 @@
             if (leftIsUp || rightIsUp) {
                 calibrationFrames++;
                 if(calibrationFrames > 40) {
-                    // Detectar espejo
                     if (leftIsUp) isMirror = true; 
                     else isMirror = false; 
 
                     playTone('calibrated');
-                    state = 'PLAYING';
-                    log(`Espejo: ${isMirror}. ¡Listo!`);
+                    log(`Espejo: ${isMirror}. Calibrado.`);
                     
-                    lastPositions = { lx: lW.x, rx: rW.x, ny: nose.y };
-                    
-                    updatePrompt("PREPÁRATE", "...", "white");
-                    setTimeout(nextMove, 2000);
+                    // PASAR A FASE DE GUARDIA
+                    startGuardCheck();
                 }
             } else {
                 calibrationFrames = 0;
             }
         }
 
-        // --- JUEGO ---
+        // --- FASE 1.5: GUARDIA ---
+        let guardFrames = 0;
+        function startGuardCheck() {
+            state = 'GUARD_CHECK';
+            updatePrompt("¡EN GUARDIA!", "PUÑOS ARRIBA", "white");
+        }
+
+        function processGuardCheck(kp) {
+            const lW = kp.find(k => k.name === 'left_wrist');
+            const rW = kp.find(k => k.name === 'right_wrist');
+            const nose = kp.find(k => k.name === 'nose');
+            
+            if(!lW || !rW || !nose) return;
+
+            // Chequear si ambas manos están cerca de la altura de la nariz (Guardia)
+            const handsUp = lW.y < nose.y + 100 && rW.y < nose.y + 100;
+
+            if(handsUp) {
+                guardFrames++;
+                if(guardFrames > 50) { // 1-2 segundos manteniendo guardia
+                    playTone('calibrated');
+                    state = 'PLAYING';
+                    // Reset historial para evitar falsos positivos al empezar
+                    lastPositions = { lx: lW.x, rx: rW.x, ny: nose.y };
+                    setTimeout(nextMove, 1000);
+                }
+            } else {
+                guardFrames = 0;
+            }
+        }
+
+        // --- FASE 2: JUEGO ---
         function nextMove() {
             if(state !== 'PLAYING') return;
             isHitProcessing = false;
 
-            const type = Math.random() > DODGE_CHANCE ? 'GOLPE' : 'ESQUIVA';
+            // Lógica Probabilística Inteligente
+            let dodgeProbability = DODGE_BASE_CHANCE;
+            
+            // Ponderación negativa basada en historial (últimos 3)
+            // history[0] es el más reciente
+            if (moveHistory[0] === 'ESQUIVA') dodgeProbability -= 0.30;
+            else if (moveHistory[1] === 'ESQUIVA') dodgeProbability -= 0.20;
+            else if (moveHistory[2] === 'ESQUIVA') dodgeProbability -= 0.10;
+
+            if (dodgeProbability < 0) dodgeProbability = 0;
+
+            // Decidir movimiento
+            const type = Math.random() < dodgeProbability ? 'ESQUIVA' : 'GOLPE';
             const side = Math.random() > 0.5 ? 'IZQUIERDA' : 'DERECHA';
 
             let actionName = "JAB";
             if (type === 'GOLPE' && Math.random() > 0.5) actionName = "GANCHO";
             if (type === 'ESQUIVA') actionName = "ESQUIVA";
 
+            // Guardar en historial
+            moveHistory.unshift(actionName); 
+            if (moveHistory.length > 3) moveHistory.pop();
+
             currentOrder = { type: actionName, side: side };
 
+            // UI
             let color = "#fff";
-            if (side === 'IZQUIERDA') color = "#00ffff"; // Cyan
-            else color = "#ff00ff"; // Magenta
+            if (side === 'IZQUIERDA') color = "#00ffff"; 
+            else color = "#ff00ff"; 
 
             let mainTxt = actionName;
             let subTxt = side;
@@ -324,12 +391,10 @@
 
             if(!rawLeft || !rawRight || !nose || !lS || !rS) return;
 
-            // Determinar muñecas reales
             let userLeftWrist, userRightWrist;
             if (isMirror) { userLeftWrist = rawRight; userRightWrist = rawLeft; } 
             else { userLeftWrist = rawLeft; userRightWrist = rawRight; }
 
-            // Velocidades
             const prevLx = lastPositions.lx || userLeftWrist.x;
             const prevRx = lastPositions.rx || userRightWrist.x;
             const vxL = Math.abs(userLeftWrist.x - prevLx);
@@ -339,88 +404,109 @@
 
             if(!currentOrder || isHitProcessing) return;
 
-            let hit = false;
-            
-            // Actualizar referencia altura hombros suavemente
             refPoints.shoulderY = (refPoints.shoulderY * 0.9) + (((lS.y + rS.y)/2) * 0.1); 
             
             const punchThreshold = 15; 
             const activeWrist = currentOrder.side === 'IZQUIERDA' ? userLeftWrist : userRightWrist;
             const activeVel = currentOrder.side === 'IZQUIERDA' ? vxL : vxR;
             
-            // Cargar Ganchos (Charge State)
-            // Si la muñeca baja por debajo del pecho + margen, se carga
             const chargeLevelY = refPoints.shoulderY + 80;
             if (userLeftWrist.y > chargeLevelY) hookCharge.left = true;
             if (userRightWrist.y > chargeLevelY) hookCharge.right = true;
 
-            // --- LÓGICA DETECCIÓN ---
+            // --- DETECCIÓN DE TODOS LOS POSIBLES MOVIMIENTOS ---
+            let detectedMove = null;
+            let detectedSide = null;
 
-            if (currentOrder.type === 'JAB') {
-                // JAB: Velocidad alta + Altura ALTA (Cerca de hombros)
-                // Se resetea la carga de gancho si tira un jab
-                if (activeVel > punchThreshold && activeWrist.y < (refPoints.shoulderY + 60)) {
-                    hit = true;
-                    punchCooldown = 20;
-                    if(currentOrder.side === 'IZQUIERDA') hookCharge.left = false;
-                    else hookCharge.right = false;
-                }
-            } 
-            else if (currentOrder.type === 'GANCHO') {
-                // GANCHO: Movimiento ascendente Y estaba cargado (brazo abajo)
-                // Chequeamos si la muñeca está SUBIENDO (Y actual < Y anterior) con velocidad
-                const isMovingUp = activeWrist.y < (currentOrder.side === 'IZQUIERDA' ? lastPositions.ly_old : lastPositions.ry_old); // Simplificado
-                
-                // Lógica de estado: Tiene que haber estado abajo (charged) y ahora estar subiendo a la altura del hombro
-                let isCharged = currentOrder.side === 'IZQUIERDA' ? hookCharge.left : hookCharge.right;
-                
-                if (isCharged && activeVel > punchThreshold && activeWrist.y < chargeLevelY) {
-                    hit = true;
-                    punchCooldown = 20;
-                    // Reset charge
-                    if(currentOrder.side === 'IZQUIERDA') hookCharge.left = false;
-                    else hookCharge.right = false;
-                }
-            }
-            else if (currentOrder.type === 'ESQUIVA') {
-                if (punchCooldown === 0) {
-                    if (nose.y > (refPoints.shoulderY + 30)) {
-                        const centerX = (lS.x + rS.x) / 2;
-                        const dx = nose.x - centerX;
-                        
-                        if (currentOrder.side === 'IZQUIERDA') {
-                            if ((isMirror && dx > 20) || (!isMirror && dx < -20)) hit = true;
-                        } else {
-                            if ((isMirror && dx < -20) || (!isMirror && dx > 20)) hit = true;
-                        }
-                        
-                        if (nose.y > refPoints.shoulderY + 80) hit = true; 
-                    }
-                }
+            // 1. Detectar JAB
+            if (vxL > punchThreshold && userLeftWrist.y < (refPoints.shoulderY + 60)) { detectedMove = 'JAB'; detectedSide = 'IZQUIERDA'; }
+            if (vxR > punchThreshold && userRightWrist.y < (refPoints.shoulderY + 60)) { detectedMove = 'JAB'; detectedSide = 'DERECHA'; }
+
+            // 2. Detectar GANCHO (Sobrescribe Jab si cumple condición estricta)
+            if (hookCharge.left && vxL > punchThreshold && userLeftWrist.y < chargeLevelY) { detectedMove = 'GANCHO'; detectedSide = 'IZQUIERDA'; }
+            if (hookCharge.right && vxR > punchThreshold && userRightWrist.y < chargeLevelY) { detectedMove = 'GANCHO'; detectedSide = 'DERECHA'; }
+
+            // 3. Detectar ESQUIVA
+            if (punchCooldown === 0 && nose.y > (refPoints.shoulderY + 40)) {
+                const centerX = (lS.x + rS.x) / 2;
+                const dx = nose.x - centerX;
+                detectedMove = 'ESQUIVA';
+                // Lógica de lado espejo/normal
+                if ((isMirror && dx > 20) || (!isMirror && dx < -20)) detectedSide = 'IZQUIERDA';
+                else if ((isMirror && dx < -20) || (!isMirror && dx > 20)) detectedSide = 'DERECHA';
+                else detectedSide = 'CENTRO'; // Agachado neutral
             }
 
-            if (hit) {
-                isHitProcessing = true;
-                playTone('hit');
-                score++;
-                updateUI();
+            // --- EVALUAR RESULTADO ---
+            if (detectedMove) {
+                // Bloquear para evitar doble lectura
+                isHitProcessing = true; 
                 
-                const mainAction = document.getElementById('main-action');
-                mainAction.style.transform = "scale(1.5)";
-                mainAction.style.color = "#0f0"; 
+                // Resetear cargas si hubo golpe
+                if (detectedMove === 'JAB' || detectedMove === 'GANCHO') {
+                    punchCooldown = 20;
+                    if(detectedSide === 'IZQUIERDA') hookCharge.left = false;
+                    else hookCharge.right = false;
+                }
+
+                // ¿Es el movimiento correcto?
+                // Nota: Aceptamos "Dodge" genérico (Centro) si pide izq/der para no ser frustrante,
+                // pero si detecta lado contrario explícito, falla.
                 
-                if(score >= TOTAL_MOVES) {
-                    setTimeout(doWin, 500);
+                const isCorrectType = detectedMove === currentOrder.type;
+                let isCorrectSide = detectedSide === currentOrder.side;
+                
+                // Tolerancia en esquivas
+                if (detectedMove === 'ESQUIVA' && detectedSide === 'CENTRO') isCorrectSide = true;
+
+                if (isCorrectType && isCorrectSide) {
+                    // ÉXITO
+                    playTone('hit');
+                    score++;
+                    updateUI();
+                    
+                    const mainAction = document.getElementById('main-action');
+                    mainAction.style.transform = "scale(1.5)";
+                    mainAction.style.color = "#0f0"; 
+                    
+                    if(score >= TOTAL_MOVES) setTimeout(doWin, 500);
+                    else setTimeout(resetRound, 200);
+
                 } else {
-                    setTimeout(() => {
-                        mainAction.style.transform = "scale(1)";
-                        currentOrder = null;
-                        document.getElementById('main-action').innerText = "";
-                        document.getElementById('sub-action').innerText = "";
-                        setTimeout(nextMove, 600);
-                    }, 200);
+                    // FALLO (Solo si la confianza es alta, aquí implícito por umbrales estrictos)
+                    // Si detecta un movimiento CLARO que no es el pedido
+                    handleMiss();
                 }
             }
+        }
+
+        function handleMiss() {
+            playTone('error');
+            playerHP--;
+            updatePlayerHP();
+            
+            // Efecto Visual de Daño
+            document.getElementById('ui-layer').classList.add('damage-effect');
+            setTimeout(() => document.getElementById('ui-layer').classList.remove('damage-effect'), 300);
+
+            const mainAction = document.getElementById('main-action');
+            mainAction.innerText = "¡FALLO!";
+            mainAction.style.color = "red";
+
+            if (playerHP <= 0) {
+                setTimeout(doLose, 500);
+            } else {
+                setTimeout(resetRound, 800); // Pausa más larga por fallo
+            }
+        }
+
+        function resetRound() {
+            const mainAction = document.getElementById('main-action');
+            mainAction.style.transform = "scale(1)";
+            currentOrder = null;
+            document.getElementById('main-action').innerText = "";
+            document.getElementById('sub-action').innerText = "";
+            setTimeout(nextMove, 600);
         }
 
         // --- UI ---
@@ -434,9 +520,15 @@
         }
 
         function updateUI() {
+            // Boss HP
             const pct = Math.floor((score / TOTAL_MOVES) * 100);
             document.getElementById('score-txt').innerText = `${pct}% DAÑO`;
             document.getElementById('hp-bar').style.width = `${100 - pct}%`;
+        }
+
+        function updatePlayerHP() {
+            const pct = (playerHP / PLAYER_MAX_HP) * 100;
+            document.getElementById('player-hp-bar').style.width = `${pct}%`;
         }
 
         function doWin() {
@@ -444,13 +536,19 @@
             video.pause();
             if(video.srcObject) video.srcObject.getTracks().forEach(t => t.stop());
             document.getElementById('ui-layer').style.display = 'none';
-            document.getElementById('game-layer').style.display = 'none'; // Ocultar video
+            document.getElementById('game-layer').style.display = 'none'; 
             document.getElementById('win-screen').style.display = 'flex';
         }
 
-        // --- DIBUJO AJUSTADO ---
+        function doLose() {
+            state = 'LOSE';
+            video.pause();
+            document.getElementById('ui-layer').style.display = 'none';
+            document.getElementById('lose-screen').style.display = 'flex';
+        }
+
+        // --- DIBUJO ---
         function drawSkeleton(kp) {
-            // Función auxiliar para transformar coordenadas de video a pantalla
             function map(pt) {
                 return {
                     x: (pt.x * renderScale) + renderOffsetX,
@@ -468,7 +566,6 @@
                 }
             });
             
-            // Conectar brazos
             connect(kp, 'left_shoulder', 'left_elbow');
             connect(kp, 'left_elbow', 'left_wrist');
             connect(kp, 'right_shoulder', 'right_elbow');
@@ -480,7 +577,6 @@
             const a = kp.find(k => k.name === nameA);
             const b = kp.find(k => k.name === nameB);
             if(a && b && a.score > 0.4 && b.score > 0.4) {
-                // Mapear coordenadas también para líneas
                 const ma = { x: (a.x * renderScale) + renderOffsetX, y: (a.y * renderScale) + renderOffsetY };
                 const mb = { x: (b.x * renderScale) + renderOffsetX, y: (b.y * renderScale) + renderOffsetY };
 
