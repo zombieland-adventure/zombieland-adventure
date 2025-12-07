@@ -15,30 +15,20 @@
     <style>
         body { background: #000; color: #0f0; overflow: hidden; font-family: 'Courier New', monospace; user-select: none; margin: 0; padding: 0; }
         
-        /* LAYOUT FULLSCREEN REAL */
         #game-layer { 
             position: fixed; top: 0; left: 0; width: 100%; height: 100%; 
             z-index: 1; 
         }
         
-        /* El video se usa de fuente pero no se muestra directamente para controlar el escalado en canvas */
-        video { 
-            position: absolute; top: 0; left: 0; width: 1px; height: 1px; opacity: 0; pointer-events: none;
-        }
-        
-        canvas { 
-            display: block; width: 100%; height: 100%; 
-            transform: scaleX(-1); /* Espejo */
-        }
+        video { position: absolute; top: 0; left: 0; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
+        canvas { display: block; width: 100%; height: 100%; transform: scaleX(-1); }
 
-        /* UI HUD */
         #ui-layer { 
             position: fixed; top: 0; left: 0; width: 100%; height: 100%; 
             pointer-events: none; z-index: 20; 
             display: flex; flex-direction: column; justify-content: space-between; padding: 20px; box-sizing: border-box;
         }
         
-        /* Texto de Acción */
         #prompt-container {
             position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
             text-align: center; width: 100%; text-shadow: 0 0 10px #000;
@@ -46,6 +36,14 @@
         .action-big { font-size: 12vw; font-weight: 900; display: block; line-height: 1; transition: transform 0.1s; }
         .action-sub { font-size: 5vw; font-weight: bold; display: block; margin-top: 10px; color: #fff; }
         
+        #action-timer-bar {
+            width: 50%; height: 10px; background: #555; margin: 20px auto 0;
+            border-radius: 5px; overflow: hidden; display: none;
+        }
+        #action-timer-fill {
+            width: 100%; height: 100%; background: #fff; transform-origin: left;
+        }
+
         /* Botón Start */
         #start-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.95); z-index: 50; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; padding: 20px; }
         button { padding: 20px 50px; font-size: 1.5rem; background: #00cc00; color: white; border: 2px solid white; font-weight: bold; cursor: pointer; border-radius: 10px; margin-top: 20px; }
@@ -56,11 +54,48 @@
         .ko-text { font-size: 25vw; color: #ff0000; font-weight: 900; animation: pulse-ko 1s infinite; text-shadow: 0 0 30px red; line-height: 0.8; }
         @keyframes pulse-ko { 0% { transform: scale(1); } 50% { transform: scale(1.05); } 100% { transform: scale(1); } }
         
+        /* Botón Reintentar (Texto Blanco) */
+        #lose-screen button { color: white !important; border-color: white !important; }
+
         #debug-log { position: absolute; bottom: 10px; left: 10px; font-size: 12px; color: yellow; background: rgba(0,0,0,0.5); padding: 5px; text-align: left; }
 
-        /* Efecto Daño */
         .damage-effect { animation: shake 0.3s; box-shadow: inset 0 0 100px red; }
+        .heal-effect { animation: pulse 0.5s; box-shadow: inset 0 0 50px #00ff00; }
         @keyframes shake { 0%, 100% { transform: translate(0,0); } 25% { transform: translate(10px,0); } 75% { transform: translate(-10px,0); } }
+        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.8; } }
+
+        /* QTE Overlay */
+        #qte-overlay {
+            position: fixed; inset: 0; background: rgba(0,0,0,0.9); z-index: 100;
+            display: none; align-items: center; justify-content: center; cursor: pointer;
+        }
+        .qte-circle {
+            width: 200px; height: 200px; position: relative;
+            display: flex; align-items: center; justify-content: center;
+        }
+        .qte-cross {
+            font-size: 100px; color: #fff; font-weight: 900; text-shadow: 0 0 20px #0f0;
+            z-index: 2; pointer-events: none;
+        }
+        .qte-progress {
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+            border-radius: 50%; border: 10px solid #333;
+            box-sizing: border-box;
+        }
+        .qte-fill {
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+            border-radius: 50%; border: 10px solid #0f0; border-top-color: transparent;
+            box-sizing: border-box; 
+            animation: spin-drain 4s linear forwards;
+        }
+        @keyframes spin-drain { 0% { transform: rotate(0deg); opacity: 1; } 100% { transform: rotate(360deg); opacity: 0; } }
+        
+        .mic-indicator {
+            position: absolute; top: 10px; right: 10px; width: 20px; height: 20px; border-radius: 50%;
+            background: #333; border: 2px solid #555; transition: all 0.1s;
+        }
+        .mic-active { background: #0f0; box-shadow: 0 0 10px #0f0; }
+
     </style>
 </head>
 <body>
@@ -68,7 +103,8 @@
     <!-- PANTALLA INICIO -->
     <div id="start-overlay">
         <h1 class="text-4xl md:text-6xl text-green-500 mb-4 font-bold tracking-widest">NEMESIS</h1>
-        <p class="text-gray-300 text-lg mb-8 max-w-md">Coloca el móvil apoyado y aléjate hasta que se te vea de cintura para arriba.</p>
+        <p class="text-gray-300 text-lg mb-2 max-w-md">Coloca el móvil apoyado y aléjate hasta que se te vea de cintura para arriba.</p>
+        <p class="text-yellow-500 text-sm mb-8 animate-pulse">[MICRÓFONO REQUERIDO PARA GRITOS DE PODER]</p>
         <button onclick="initSystem()">INICIAR COMBATE</button>
     </div>
 
@@ -87,6 +123,16 @@
         <button onclick="location.reload()" style="background: red; border-color: red;">REINTENTAR</button>
     </div>
 
+    <!-- QTE OVERLAY -->
+    <div id="qte-overlay" onclick="handleQTEClick()">
+        <div class="qte-circle">
+            <div class="qte-progress"></div>
+            <div id="qte-anim" class="qte-fill"></div>
+            <div class="qte-cross">+</div>
+        </div>
+        <p class="absolute bottom-20 text-white font-bold text-2xl animate-bounce">¡PULSA!</p>
+    </div>
+
     <!-- JUEGO -->
     <div id="game-layer">
         <video id="video" playsinline></video>
@@ -95,9 +141,9 @@
 
     <!-- HUD -->
     <div id="ui-layer" style="display:none;">
-        <!-- Barras de Vida (Jugador vs Boss) -->
+        <div class="mic-indicator" id="mic-led"></div>
+        
         <div class="w-full flex justify-between items-start gap-4">
-            
             <!-- Jugador -->
             <div class="w-1/3 max-w-sm">
                 <div class="flex justify-between text-white font-bold text-sm md:text-lg drop-shadow-md">
@@ -107,7 +153,6 @@
                     <div id="player-hp-bar" class="h-full bg-gradient-to-r from-blue-600 to-cyan-400 transition-all duration-300" style="width: 100%"></div>
                 </div>
             </div>
-
             <!-- Boss -->
             <div class="w-1/2 max-w-2xl text-right">
                 <div class="flex justify-end text-white font-bold text-xl drop-shadow-md">
@@ -124,6 +169,7 @@
         <div id="prompt-container">
             <span id="main-action" class="action-big text-yellow-400">CALIBRANDO</span>
             <span id="sub-action" class="action-sub">...</span>
+            <div id="action-timer-bar"><div id="action-timer-fill"></div></div>
         </div>
 
         <div id="debug-log">Iniciando...</div>
@@ -133,30 +179,36 @@
         // --- CONFIGURACIÓN ---
         const TOTAL_MOVES = 30;       
         const DODGE_BASE_CHANCE = 0.25;
-        const PLAYER_MAX_HP = 5; // Fallos permitidos
+        const PLAYER_MAX_HP = 5; 
+        const TIME_LIMIT_PUNCH = 5000; 
+        const TIME_LIMIT_DODGE = 2500; 
         
         // --- ESTADO ---
         let detector, video, canvas, ctx;
-        let state = 'INIT'; // INIT, CALIBRATING, GUARD_CHECK, PLAYING, WIN, LOSE
+        let state = 'INIT'; 
         let score = 0;
         let playerHP = PLAYER_MAX_HP;
         let currentOrder = null; 
         let isMirror = false; 
         let isHitProcessing = false;
         
-        // Renderizado
         let renderScale = 1;
         let renderOffsetX = 0;
         let renderOffsetY = 0;
         
-        // Referencias Corporales
         let lastPositions = {}; 
         let refPoints = { noseY: 0, shoulderY: 0, shoulderWidth: 0 };
         
-        // Lógica de Juego
         let hookCharge = { left: false, right: false };
         let punchCooldown = 0; 
-        let moveHistory = []; // Pila de últimos movimientos
+        let moveHistory = []; 
+        let actionStartTime = 0;
+        
+        // Mecánicas de Vida
+        let streakCount = 0; // Racha de aciertos para curar
+        let shoutCooldown = 0;
+        let analyser, dataArray; // Audio analysis
+        let qteTimer = null;
 
         // --- AUDIO ---
         const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
@@ -177,6 +229,9 @@
             } else if (type === 'error') {
                 osc.type = 'sawtooth'; osc.frequency.setValueAtTime(100, t); osc.frequency.linearRampToValueAtTime(50, t+0.4);
                 g.gain.setValueAtTime(0.5, t); osc.start(t); osc.stop(t+0.4);
+            } else if (type === 'heal') {
+                osc.type = 'sine'; osc.frequency.setValueAtTime(400, t); osc.frequency.linearRampToValueAtTime(800, t+0.5);
+                g.gain.setValueAtTime(0.3, t); osc.start(t); osc.stop(t+0.5);
             } else if (type === 'calibrated') {
                 osc.type = 'sine'; osc.frequency.setValueAtTime(440, t); osc.frequency.linearRampToValueAtTime(880, t+0.3);
                 g.gain.setValueAtTime(0.2, t); osc.start(t); osc.stop(t+0.3);
@@ -188,18 +243,28 @@
         async function initSystem() {
             document.getElementById('start-overlay').style.display = 'none';
             document.getElementById('ui-layer').style.display = 'flex';
-            log("Cargando cámara...");
+            log("Cargando sensores...");
 
             try {
+                // Solicitar Video Y Audio
+                const stream = await navigator.mediaDevices.getUserMedia({ 
+                    video: { facingMode: 'user', width: {ideal: 640}, height: {ideal: 480} },
+                    audio: true 
+                });
+                
+                // Configurar Video
                 video = document.getElementById('video');
                 canvas = document.getElementById('output');
                 ctx = canvas.getContext('2d');
-
-                const stream = await navigator.mediaDevices.getUserMedia({ 
-                    video: { facingMode: 'user', width: {ideal: 640}, height: {ideal: 480} } 
-                });
                 video.srcObject = stream;
                 
+                // Configurar Audio Analyser (Gritos)
+                const audioStream = audioCtx.createMediaStreamSource(stream);
+                analyser = audioCtx.createAnalyser();
+                analyser.fftSize = 256;
+                audioStream.connect(analyser);
+                dataArray = new Uint8Array(analyser.frequencyBinCount);
+
                 await new Promise(r => video.onloadedmetadata = () => {
                     video.play();
                     handleResize();
@@ -216,7 +281,7 @@
                 loop();
 
             } catch (e) {
-                alert("Error cámara: " + e.message);
+                alert("Error de acceso: " + e.message + "\nActiva permisos de cámara y micrófono.");
                 location.reload();
             }
         }
@@ -240,9 +305,73 @@
 
         function log(msg) { document.getElementById('debug-log').innerText = msg; }
 
+        // --- SISTEMA DE GRITOS (CURA) ---
+        function checkAudioLevel() {
+            if (!analyser || state !== 'PLAYING') return;
+            if (shoutCooldown > 0) { shoutCooldown--; return; }
+
+            analyser.getByteFrequencyData(dataArray);
+            let sum = 0;
+            for(let i = 0; i < dataArray.length; i++) sum += dataArray[i];
+            let average = sum / dataArray.length;
+
+            // Umbral de grito (ajustable)
+            if (average > 60) { // Grito detectado
+                document.getElementById('mic-led').classList.add('mic-active');
+                healPlayer(1, "¡GRITO DE PODER!");
+                shoutCooldown = 200; // Cooldown largo (~3 seg)
+                setTimeout(() => document.getElementById('mic-led').classList.remove('mic-active'), 500);
+            }
+        }
+
+        // --- QTE SYSTEM ---
+        function triggerQTE() {
+            if (state !== 'PLAYING') return;
+            state = 'QTE'; // Congela el juego
+            
+            const qte = document.getElementById('qte-overlay');
+            qte.style.display = 'flex';
+            
+            // Reiniciar animación CSS
+            const fill = document.getElementById('qte-anim');
+            fill.style.animation = 'none';
+            fill.offsetHeight; /* trigger reflow */
+            fill.style.animation = 'spin-drain 4s linear forwards';
+
+            // Tiempo límite para fallar (4s)
+            qteTimer = setTimeout(() => {
+                handleQTEFail();
+            }, 4000);
+        }
+
+        function handleQTEClick() {
+            if (state !== 'QTE') return;
+            clearTimeout(qteTimer);
+            
+            // ÉXITO
+            playTone('heal');
+            healPlayer(PLAYER_MAX_HP, "¡RECUPERACIÓN TOTAL!"); // Cura completa
+            
+            document.getElementById('qte-overlay').style.display = 'none';
+            state = 'PLAYING';
+            // Retomar el juego tras breve pausa
+            setTimeout(nextMove, 1000);
+        }
+
+        function handleQTEFail() {
+            document.getElementById('qte-overlay').style.display = 'none';
+            playTone('error');
+            state = 'PLAYING';
+            // No penalizamos vida extra, pero perdimos la oportunidad de curar
+            handleMiss("¡OPORTUNIDAD PERDIDA!");
+        }
+
         // --- BUCLE PRINCIPAL ---
         async function loop() {
             if(state === 'WIN' || state === 'LOSE') return;
+
+            // Procesar Audio
+            checkAudioLevel();
 
             // Dibujar video
             ctx.clearRect(0, 0, canvas.width, canvas.height);
@@ -251,7 +380,6 @@
                 renderOffsetX, renderOffsetY, video.videoWidth * renderScale, video.videoHeight * renderScale
             );
 
-            // Detectar Pose
             const poses = await detector.estimatePoses(video);
             
             if (poses.length > 0) {
@@ -261,6 +389,18 @@
                 if (state === 'CALIBRATING') processCalibration(kp);
                 else if (state === 'GUARD_CHECK') processGuardCheck(kp);
                 else if (state === 'PLAYING') processGameplay(kp);
+            }
+
+            // Actualizar Barra Tiempo
+            if (state === 'PLAYING' && currentOrder && !isHitProcessing) {
+                const elapsed = Date.now() - actionStartTime;
+                const limit = currentOrder.type === 'ESQUIVA' ? TIME_LIMIT_DODGE : TIME_LIMIT_PUNCH;
+                const pct = Math.max(0, 100 - ((elapsed / limit) * 100));
+                document.getElementById('action-timer-fill').style.width = `${pct}%`;
+                
+                if (elapsed > limit) {
+                    handleMiss("¡LENTO!");
+                }
             }
 
             requestAnimationFrame(loop);
@@ -297,8 +437,6 @@
 
                     playTone('calibrated');
                     log(`Espejo: ${isMirror}. Calibrado.`);
-                    
-                    // PASAR A FASE DE GUARDIA
                     startGuardCheck();
                 }
             } else {
@@ -319,16 +457,13 @@
             const nose = kp.find(k => k.name === 'nose');
             
             if(!lW || !rW || !nose) return;
-
-            // Chequear si ambas manos están cerca de la altura de la nariz (Guardia)
             const handsUp = lW.y < nose.y + 100 && rW.y < nose.y + 100;
 
             if(handsUp) {
                 guardFrames++;
-                if(guardFrames > 50) { // 1-2 segundos manteniendo guardia
+                if(guardFrames > 50) { 
                     playTone('calibrated');
                     state = 'PLAYING';
-                    // Reset historial para evitar falsos positivos al empezar
                     lastPositions = { lx: lW.x, rx: rW.x, ny: nose.y };
                     setTimeout(nextMove, 1000);
                 }
@@ -342,18 +477,18 @@
             if(state !== 'PLAYING') return;
             isHitProcessing = false;
 
-            // Lógica Probabilística Inteligente
+            // Probabilidad QTE (Si vida baja)
+            if (playerHP <= 2 && Math.random() < 0.4) {
+                triggerQTE();
+                return;
+            }
+
             let dodgeProbability = DODGE_BASE_CHANCE;
-            
-            // Ponderación negativa basada en historial (últimos 3)
-            // history[0] es el más reciente
             if (moveHistory[0] === 'ESQUIVA') dodgeProbability -= 0.30;
             else if (moveHistory[1] === 'ESQUIVA') dodgeProbability -= 0.20;
             else if (moveHistory[2] === 'ESQUIVA') dodgeProbability -= 0.10;
-
             if (dodgeProbability < 0) dodgeProbability = 0;
 
-            // Decidir movimiento
             const type = Math.random() < dodgeProbability ? 'ESQUIVA' : 'GOLPE';
             const side = Math.random() > 0.5 ? 'IZQUIERDA' : 'DERECHA';
 
@@ -361,13 +496,12 @@
             if (type === 'GOLPE' && Math.random() > 0.5) actionName = "GANCHO";
             if (type === 'ESQUIVA') actionName = "ESQUIVA";
 
-            // Guardar en historial
             moveHistory.unshift(actionName); 
             if (moveHistory.length > 3) moveHistory.pop();
 
             currentOrder = { type: actionName, side: side };
+            actionStartTime = Date.now(); 
 
-            // UI
             let color = "#fff";
             if (side === 'IZQUIERDA') color = "#00ffff"; 
             else color = "#ff00ff"; 
@@ -377,6 +511,7 @@
             if(actionName === "ESQUIVA") { mainTxt = "¡ABAJO!"; subTxt = "ESQUIVA " + side; }
 
             updatePrompt(mainTxt, subTxt, color);
+            document.getElementById('action-timer-bar').style.display = 'block';
             playTone('voice');
         }
 
@@ -405,66 +540,57 @@
             if(!currentOrder || isHitProcessing) return;
 
             refPoints.shoulderY = (refPoints.shoulderY * 0.9) + (((lS.y + rS.y)/2) * 0.1); 
-            
             const punchThreshold = 15; 
-            const activeWrist = currentOrder.side === 'IZQUIERDA' ? userLeftWrist : userRightWrist;
-            const activeVel = currentOrder.side === 'IZQUIERDA' ? vxL : vxR;
-            
             const chargeLevelY = refPoints.shoulderY + 80;
             if (userLeftWrist.y > chargeLevelY) hookCharge.left = true;
             if (userRightWrist.y > chargeLevelY) hookCharge.right = true;
 
-            // --- DETECCIÓN DE TODOS LOS POSIBLES MOVIMIENTOS ---
+            // --- DETECCIÓN ---
             let detectedMove = null;
             let detectedSide = null;
 
-            // 1. Detectar JAB
+            // JAB
             if (vxL > punchThreshold && userLeftWrist.y < (refPoints.shoulderY + 60)) { detectedMove = 'JAB'; detectedSide = 'IZQUIERDA'; }
             if (vxR > punchThreshold && userRightWrist.y < (refPoints.shoulderY + 60)) { detectedMove = 'JAB'; detectedSide = 'DERECHA'; }
 
-            // 2. Detectar GANCHO (Sobrescribe Jab si cumple condición estricta)
+            // GANCHO
             if (hookCharge.left && vxL > punchThreshold && userLeftWrist.y < chargeLevelY) { detectedMove = 'GANCHO'; detectedSide = 'IZQUIERDA'; }
             if (hookCharge.right && vxR > punchThreshold && userRightWrist.y < chargeLevelY) { detectedMove = 'GANCHO'; detectedSide = 'DERECHA'; }
 
-            // 3. Detectar ESQUIVA
+            // ESQUIVA
             if (punchCooldown === 0 && nose.y > (refPoints.shoulderY + 40)) {
                 const centerX = (lS.x + rS.x) / 2;
                 const dx = nose.x - centerX;
                 detectedMove = 'ESQUIVA';
-                // Lógica de lado espejo/normal
                 if ((isMirror && dx > 20) || (!isMirror && dx < -20)) detectedSide = 'IZQUIERDA';
                 else if ((isMirror && dx < -20) || (!isMirror && dx > 20)) detectedSide = 'DERECHA';
-                else detectedSide = 'CENTRO'; // Agachado neutral
+                else detectedSide = 'CENTRO'; 
             }
 
-            // --- EVALUAR RESULTADO ---
             if (detectedMove) {
-                // Bloquear para evitar doble lectura
                 isHitProcessing = true; 
-                
-                // Resetear cargas si hubo golpe
                 if (detectedMove === 'JAB' || detectedMove === 'GANCHO') {
                     punchCooldown = 20;
                     if(detectedSide === 'IZQUIERDA') hookCharge.left = false;
                     else hookCharge.right = false;
                 }
 
-                // ¿Es el movimiento correcto?
-                // Nota: Aceptamos "Dodge" genérico (Centro) si pide izq/der para no ser frustrante,
-                // pero si detecta lado contrario explícito, falla.
-                
                 const isCorrectType = detectedMove === currentOrder.type;
                 let isCorrectSide = detectedSide === currentOrder.side;
-                
-                // Tolerancia en esquivas
                 if (detectedMove === 'ESQUIVA' && detectedSide === 'CENTRO') isCorrectSide = true;
 
                 if (isCorrectType && isCorrectSide) {
-                    // ÉXITO
+                    // SUCCESS
                     playTone('hit');
                     score++;
-                    updateUI();
+                    streakCount++; // Racha
                     
+                    // Curación por Racha (Cada 5)
+                    if(streakCount > 0 && streakCount % 5 === 0) {
+                        healPlayer(1, "RACHA: +1 HP");
+                    }
+
+                    updateUI();
                     const mainAction = document.getElementById('main-action');
                     mainAction.style.transform = "scale(1.5)";
                     mainAction.style.color = "#0f0"; 
@@ -473,30 +599,50 @@
                     else setTimeout(resetRound, 200);
 
                 } else {
-                    // FALLO (Solo si la confianza es alta, aquí implícito por umbrales estrictos)
-                    // Si detecta un movimiento CLARO que no es el pedido
                     handleMiss();
                 }
             }
         }
 
-        function handleMiss() {
+        function handleMiss(reason) {
+            if (isHitProcessing) return; 
+            isHitProcessing = true;
             playTone('error');
+            
+            streakCount = 0; // Reset racha
             playerHP--;
             updatePlayerHP();
             
-            // Efecto Visual de Daño
             document.getElementById('ui-layer').classList.add('damage-effect');
             setTimeout(() => document.getElementById('ui-layer').classList.remove('damage-effect'), 300);
 
             const mainAction = document.getElementById('main-action');
-            mainAction.innerText = "¡FALLO!";
+            mainAction.innerText = reason || "¡FALLO!";
             mainAction.style.color = "red";
 
             if (playerHP <= 0) {
                 setTimeout(doLose, 500);
             } else {
-                setTimeout(resetRound, 800); // Pausa más larga por fallo
+                setTimeout(resetRound, 800);
+            }
+        }
+
+        function healPlayer(amount, msg) {
+            if(playerHP < PLAYER_MAX_HP) {
+                playerHP = Math.min(PLAYER_MAX_HP, playerHP + amount);
+                updatePlayerHP();
+                playTone('heal');
+                
+                // Efecto visual
+                document.getElementById('ui-layer').classList.add('heal-effect');
+                setTimeout(() => document.getElementById('ui-layer').classList.remove('heal-effect'), 500);
+                
+                // Mostrar mensaje flotante
+                const sub = document.getElementById('sub-action');
+                const prevText = sub.innerText;
+                sub.innerText = msg;
+                sub.style.color = "#0f0";
+                setTimeout(() => { sub.innerText = prevText; sub.style.color = "white"; }, 1500);
             }
         }
 
@@ -506,6 +652,7 @@
             currentOrder = null;
             document.getElementById('main-action').innerText = "";
             document.getElementById('sub-action').innerText = "";
+            document.getElementById('action-timer-bar').style.display = 'none';
             setTimeout(nextMove, 600);
         }
 
@@ -520,7 +667,6 @@
         }
 
         function updateUI() {
-            // Boss HP
             const pct = Math.floor((score / TOTAL_MOVES) * 100);
             document.getElementById('score-txt').innerText = `${pct}% DAÑO`;
             document.getElementById('hp-bar').style.width = `${100 - pct}%`;
