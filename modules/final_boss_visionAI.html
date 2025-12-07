@@ -20,6 +20,7 @@
             z-index: 1; 
         }
         
+        /* Video oculto pero silenciado para evitar eco */
         video { position: absolute; top: 0; left: 0; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
         canvas { display: block; width: 100%; height: 100%; transform: scaleX(-1); }
 
@@ -135,7 +136,8 @@
 
     <!-- JUEGO -->
     <div id="game-layer">
-        <video id="video" playsinline></video>
+        <!-- AÑADIDO: muted para evitar feedback de audio -->
+        <video id="video" playsinline muted></video>
         <canvas id="output"></canvas>
     </div>
 
@@ -205,9 +207,9 @@
         let actionStartTime = 0;
         
         // Mecánicas de Vida
-        let streakCount = 0; // Racha de aciertos para curar
+        let streakCount = 0; 
         let shoutCooldown = 0;
-        let analyser, dataArray; // Audio analysis
+        let analyser, dataArray; 
         let qteTimer = null;
 
         // --- AUDIO ---
@@ -246,19 +248,16 @@
             log("Cargando sensores...");
 
             try {
-                // Solicitar Video Y Audio
                 const stream = await navigator.mediaDevices.getUserMedia({ 
                     video: { facingMode: 'user', width: {ideal: 640}, height: {ideal: 480} },
                     audio: true 
                 });
                 
-                // Configurar Video
                 video = document.getElementById('video');
                 canvas = document.getElementById('output');
                 ctx = canvas.getContext('2d');
                 video.srcObject = stream;
                 
-                // Configurar Audio Analyser (Gritos)
                 const audioStream = audioCtx.createMediaStreamSource(stream);
                 analyser = audioCtx.createAnalyser();
                 analyser.fftSize = 256;
@@ -315,11 +314,10 @@
             for(let i = 0; i < dataArray.length; i++) sum += dataArray[i];
             let average = sum / dataArray.length;
 
-            // Umbral de grito (ajustable)
-            if (average > 60) { // Grito detectado
+            if (average > 60) { 
                 document.getElementById('mic-led').classList.add('mic-active');
                 healPlayer(1, "¡GRITO DE PODER!");
-                shoutCooldown = 200; // Cooldown largo (~3 seg)
+                shoutCooldown = 200; 
                 setTimeout(() => document.getElementById('mic-led').classList.remove('mic-active'), 500);
             }
         }
@@ -327,18 +325,16 @@
         // --- QTE SYSTEM ---
         function triggerQTE() {
             if (state !== 'PLAYING') return;
-            state = 'QTE'; // Congela el juego
+            state = 'QTE'; 
             
             const qte = document.getElementById('qte-overlay');
             qte.style.display = 'flex';
             
-            // Reiniciar animación CSS
             const fill = document.getElementById('qte-anim');
             fill.style.animation = 'none';
-            fill.offsetHeight; /* trigger reflow */
+            fill.offsetHeight; 
             fill.style.animation = 'spin-drain 4s linear forwards';
 
-            // Tiempo límite para fallar (4s)
             qteTimer = setTimeout(() => {
                 handleQTEFail();
             }, 4000);
@@ -348,13 +344,11 @@
             if (state !== 'QTE') return;
             clearTimeout(qteTimer);
             
-            // ÉXITO
             playTone('heal');
-            healPlayer(PLAYER_MAX_HP, "¡RECUPERACIÓN TOTAL!"); // Cura completa
+            healPlayer(PLAYER_MAX_HP, "¡RECUPERACIÓN TOTAL!"); 
             
             document.getElementById('qte-overlay').style.display = 'none';
             state = 'PLAYING';
-            // Retomar el juego tras breve pausa
             setTimeout(nextMove, 1000);
         }
 
@@ -362,13 +356,14 @@
             document.getElementById('qte-overlay').style.display = 'none';
             playTone('error');
             state = 'PLAYING';
-            // No penalizamos vida extra, pero perdimos la oportunidad de curar
             handleMiss("¡OPORTUNIDAD PERDIDA!");
         }
 
         // --- BUCLE PRINCIPAL ---
         async function loop() {
-            if(state === 'WIN' || state === 'LOSE') return;
+            // Permitimos renderizar incluso en Game Over para que no parezca colgado,
+            // pero si es WIN/LOSE los controles ya no responden.
+            if(state === 'WIN' && !video.paused) return; 
 
             // Procesar Audio
             checkAudioLevel();
@@ -380,15 +375,18 @@
                 renderOffsetX, renderOffsetY, video.videoWidth * renderScale, video.videoHeight * renderScale
             );
 
-            const poses = await detector.estimatePoses(video);
-            
-            if (poses.length > 0) {
-                const kp = poses[0].keypoints;
-                drawSkeleton(kp); 
+            // Si ya perdimos, no detectamos poses para ahorrar recursos y evitar bugs
+            if (state !== 'LOSE' && state !== 'WIN') {
+                const poses = await detector.estimatePoses(video);
                 
-                if (state === 'CALIBRATING') processCalibration(kp);
-                else if (state === 'GUARD_CHECK') processGuardCheck(kp);
-                else if (state === 'PLAYING') processGameplay(kp);
+                if (poses.length > 0) {
+                    const kp = poses[0].keypoints;
+                    drawSkeleton(kp); 
+                    
+                    if (state === 'CALIBRATING') processCalibration(kp);
+                    else if (state === 'GUARD_CHECK') processGuardCheck(kp);
+                    else if (state === 'PLAYING') processGameplay(kp);
+                }
             }
 
             // Actualizar Barra Tiempo
@@ -477,7 +475,6 @@
             if(state !== 'PLAYING') return;
             isHitProcessing = false;
 
-            // Probabilidad QTE (Si vida baja)
             if (playerHP <= 2 && Math.random() < 0.4) {
                 triggerQTE();
                 return;
@@ -580,12 +577,10 @@
                 if (detectedMove === 'ESQUIVA' && detectedSide === 'CENTRO') isCorrectSide = true;
 
                 if (isCorrectType && isCorrectSide) {
-                    // SUCCESS
                     playTone('hit');
                     score++;
-                    streakCount++; // Racha
+                    streakCount++;
                     
-                    // Curación por Racha (Cada 5)
                     if(streakCount > 0 && streakCount % 5 === 0) {
                         healPlayer(1, "RACHA: +1 HP");
                     }
@@ -609,7 +604,7 @@
             isHitProcessing = true;
             playTone('error');
             
-            streakCount = 0; // Reset racha
+            streakCount = 0; 
             playerHP--;
             updatePlayerHP();
             
@@ -623,7 +618,7 @@
             if (playerHP <= 0) {
                 setTimeout(doLose, 500);
             } else {
-                setTimeout(resetRound, 800);
+                setTimeout(resetRound, 600); // Pausa reducida para no cortar el ritmo
             }
         }
 
@@ -633,11 +628,9 @@
                 updatePlayerHP();
                 playTone('heal');
                 
-                // Efecto visual
                 document.getElementById('ui-layer').classList.add('heal-effect');
                 setTimeout(() => document.getElementById('ui-layer').classList.remove('heal-effect'), 500);
                 
-                // Mostrar mensaje flotante
                 const sub = document.getElementById('sub-action');
                 const prevText = sub.innerText;
                 sub.innerText = msg;
@@ -689,6 +682,8 @@
         function doLose() {
             state = 'LOSE';
             video.pause();
+            // No detenemos el stream de cámara aún para que el fondo no sea negro absoluto,
+            // pero el juego ya no procesa.
             document.getElementById('ui-layer').style.display = 'none';
             document.getElementById('lose-screen').style.display = 'flex';
         }
