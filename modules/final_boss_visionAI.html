@@ -20,6 +20,7 @@
             z-index: 1; 
         }
         
+        /* Video silenciado y oculto */
         video { position: absolute; top: 0; left: 0; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
         canvas { display: block; width: 100%; height: 100%; transform: scaleX(-1); }
 
@@ -36,7 +37,6 @@
         .action-big { font-size: 12vw; font-weight: 900; display: block; line-height: 1; transition: transform 0.1s; }
         .action-sub { font-size: 5vw; font-weight: bold; display: block; margin-top: 10px; color: #fff; }
         
-        /* Barra de Tiempo */
         #action-timer-bar {
             width: 50%; height: 10px; background: #555; margin: 20px auto 0;
             border-radius: 5px; overflow: hidden; display: none;
@@ -45,15 +45,19 @@
             width: 100%; height: 100%; background: #fff; transform-origin: left;
         }
 
-        /* BONUS MODE UI */
+        /* BONUS MODE UI (MEJORADO) */
         #bonus-container {
-            display: none; flex-direction: row; justify-content: center; gap: 10px; margin-top: 20px;
+            display: none; flex-direction: row; justify-content: center; gap: 15px; margin-top: 30px;
         }
         .bonus-item {
-            padding: 10px; border: 2px solid #fff; color: #fff; font-weight: bold; background: rgba(0,0,0,0.5); opacity: 0.5;
+            padding: 15px 25px; border: 4px solid #fff; color: #fff; font-weight: 900; background: rgba(0,0,0,0.7); opacity: 0.4;
+            font-size: 2rem; border-radius: 10px; transition: all 0.2s;
         }
-        .bonus-active { opacity: 1; border-color: #0f0; background: rgba(0, 255, 0, 0.2); transform: scale(1.1); }
-        .bonus-done { opacity: 0.3; background: #0f0; border-color: #0f0; color: #000; }
+        .bonus-active { 
+            opacity: 1; border-color: #0f0; background: rgba(0, 255, 0, 0.3); transform: scale(1.3); 
+            box-shadow: 0 0 20px #0f0; color: #0f0;
+        }
+        .bonus-done { opacity: 0.3; background: #0f0; border-color: #0f0; color: #000; transform: scale(0.8); }
 
         #start-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.95); z-index: 50; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; padding: 20px; }
         button { padding: 20px 50px; font-size: 1.5rem; background: #00cc00; color: white; border: 2px solid white; font-weight: bold; cursor: pointer; border-radius: 10px; margin-top: 20px; }
@@ -148,8 +152,8 @@
         const DODGE_BASE_CHANCE = 0.25;
         const PLAYER_MAX_HP = 5; 
         const TIME_LIMIT_PUNCH = 5000; 
-        const TIME_LIMIT_DODGE = 2500; 
-        const TIME_LIMIT_BONUS = 4000; // Tiempo total para el combo de 3
+        const TIME_LIMIT_DODGE = 3000; 
+        const TIME_LIMIT_BONUS = 5000; // Tiempo total para el combo de 3
         
         // --- ESTADO ---
         let detector, video, canvas, ctx;
@@ -173,6 +177,7 @@
         let moveHistory = []; 
         let actionStartTime = 0;
         let uiTimeout = null;
+        let currentTimerId = null;
 
         // Bonus State
         let bonusQueue = [];
@@ -428,6 +433,9 @@
         function nextMove() {
             if(state !== 'PLAYING') return;
             isHitProcessing = false;
+            
+            // Limpiar timers previos por seguridad
+            if (currentTimerId) clearTimeout(currentTimerId);
 
             // BONUS CHECK (Solo si vida baja y no acabamos de salir de uno)
             if (playerHP <= 2 && Math.random() < 0.5) {
@@ -441,13 +449,7 @@
 
             // Decidir tipo primero
             const type = Math.random() < dodgeProbability ? 'ESQUIVA' : 'GOLPE';
-            
-            // Filtrar candidatos por tipo y aplicar pesos
-            const next = getNextMove(); // Usamos la función ponderada general
-            
-            // Si el tipo decidido era ESQUIVA, forzamos esquiva aunque el peso diga lo contrario (para respetar la probabilidad base global)
-            // O mejor, confiamos en getNextMove pero ajustamos los pesos antes de llamar.
-            // Para simplificar, usaremos el getNextMove tal cual, ya penaliza repeticiones.
+            const next = getNextMove(); // Usamos la función ponderada
 
             moveHistory.unshift(next); 
             if (moveHistory.length > 3) moveHistory.pop();
@@ -482,7 +484,7 @@
             actionStartTime = Date.now(); // Tiempo global para todo el combo
 
             // UI
-            updatePrompt("¡COMBO!", "RECUPERACIÓN", "yellow");
+            updatePrompt("¡SALUD CRÍTICA!", "MODO BONUS", "yellow");
             renderBonusUI();
             document.getElementById('bonus-container').style.display = 'flex';
             document.getElementById('action-timer-bar').style.display = 'block';
@@ -516,7 +518,13 @@
                 playTone('hit');
                 currentOrder = bonusQueue[bonusIndex];
                 renderBonusUI();
-                isHitProcessing = false; // Permitir siguiente golpe inmediato
+                isHitProcessing = false; 
+                
+                // Pequeña pausa para no detectar el mismo golpe dos veces
+                currentTimerId = setTimeout(() => {
+                    // Solo continuar si seguimos en bonus
+                    if (state === 'BONUS') isHitProcessing = false;
+                }, 300);
             }
         }
 
@@ -533,7 +541,7 @@
             document.getElementById('action-timer-bar').style.display = 'none';
             state = 'PLAYING';
             // Pausa larga tras bonus
-            setTimeout(nextMove, 2000);
+            currentTimerId = setTimeout(nextMove, 2000);
         }
 
         // --- PROCESAMIENTO FÍSICO ---
@@ -568,7 +576,7 @@
 
             refPoints.shoulderY = (refPoints.shoulderY * 0.9) + (((lS.y + rS.y)/2) * 0.1); 
             const punchThreshold = 15; 
-            const chargeLevelY = refPoints.shoulderY + 80;
+            const chargeLevelY = refPoints.shoulderY + 100; // Más permisivo
             if (userLeftWrist.y > chargeLevelY) hookCharge.left = true;
             if (userRightWrist.y > chargeLevelY) hookCharge.right = true;
 
@@ -576,25 +584,22 @@
             let detectedMove = null;
             let detectedSide = null;
 
-            // 1. ESQUIVA (ADAPTATIVA: Porcentaje del ancho de hombros)
-            // Detectamos si la nariz baja un 15% del ancho de hombros respecto a la referencia
-            // Esto ajusta la dificultad según la distancia a la cámara
-            const squatThreshold = refPoints.shoulderWidth * 0.15; 
+            // 1. ESQUIVA (ADAPTATIVA: Solo 10% del ancho de hombros para ser más fácil)
+            const squatThreshold = refPoints.shoulderWidth * 0.10; 
             if (punchCooldown === 0 && nose.y > (refPoints.shoulderY + squatThreshold)) {
                 const centerX = (lS.x + rS.x) / 2;
                 const dx = nose.x - centerX;
                 detectedMove = 'ESQUIVA';
-                // Side logic
                 if ((isMirror && dx > 20) || (!isMirror && dx < -20)) detectedSide = 'IZQUIERDA';
                 else if ((isMirror && dx < -20) || (!isMirror && dx > 20)) detectedSide = 'DERECHA';
                 else detectedSide = 'CENTRO'; 
             }
             
-            // 2. GOLPES (Solo si no esquiva)
+            // 2. GOLPES (Solo si no hay esquiva)
             if (!detectedMove) {
-                // JAB
-                if (vxL > punchThreshold && userLeftWrist.y < (refPoints.shoulderY + 60)) { detectedMove = 'JAB'; detectedSide = 'IZQUIERDA'; }
-                if (vxR > punchThreshold && userRightWrist.y < (refPoints.shoulderY + 60)) { detectedMove = 'JAB'; detectedSide = 'DERECHA'; }
+                // JAB (Margen vertical aumentado: shoulderY + 100)
+                if (vxL > punchThreshold && userLeftWrist.y < (refPoints.shoulderY + 100)) { detectedMove = 'JAB'; detectedSide = 'IZQUIERDA'; }
+                if (vxR > punchThreshold && userRightWrist.y < (refPoints.shoulderY + 100)) { detectedMove = 'JAB'; detectedSide = 'DERECHA'; }
 
                 // GANCHO
                 if (hookCharge.left && vxL > punchThreshold && vyL < -5 && userLeftWrist.y < chargeLevelY) { detectedMove = 'GANCHO'; detectedSide = 'IZQUIERDA'; }
@@ -619,7 +624,6 @@
                     if (state === 'BONUS') {
                         advanceBonus();
                     } else {
-                        // NORMAL PLAY
                         playTone('hit');
                         score++;
                         updateUI();
@@ -628,15 +632,13 @@
                         mainAction.style.transform = "scale(1.5)";
                         mainAction.style.color = "#0f0"; 
                         
-                        if(score >= TOTAL_MOVES) setTimeout(doWin, 500);
-                        else setTimeout(resetRound, 200);
+                        if(score >= TOTAL_MOVES) currentTimerId = setTimeout(doWin, 500);
+                        else currentTimerId = setTimeout(resetRound, 200);
                     }
 
                 } else {
-                    // Si falla en Bonus, no penaliza, solo acaba
                     if (state === 'BONUS') {
-                        // Opcional: Podríamos ser permisivos y no fallar el bonus por un movimiento erróneo, 
-                        // solo por tiempo. De momento, dejémoslo solo por tiempo para ser amables.
+                        // Bonus perdona fallos de movimiento, solo falla por tiempo
                     } else {
                         handleMiss();
                     }
@@ -661,9 +663,9 @@
             mainAction.style.color = "red";
 
             if (playerHP <= 0) {
-                setTimeout(doLose, 500);
+                currentTimerId = setTimeout(doLose, 500);
             } else {
-                setTimeout(resetRound, 600);
+                currentTimerId = setTimeout(resetRound, 600);
             }
         }
 
@@ -671,7 +673,6 @@
             if(playerHP < PLAYER_MAX_HP) {
                 playerHP = Math.min(PLAYER_MAX_HP, playerHP + amount);
                 updatePlayerHP();
-                playTone('heal');
                 
                 document.getElementById('ui-layer').classList.add('heal-effect');
                 setTimeout(() => document.getElementById('ui-layer').classList.remove('heal-effect'), 500);
@@ -682,8 +683,6 @@
                 const prevText = sub.innerText;
                 sub.innerText = msg;
                 sub.style.color = "#0f0";
-                
-                // No restauramos texto antiguo porque resetRound lo hará
             }
         }
 
@@ -697,7 +696,7 @@
             document.getElementById('action-timer-bar').style.display = 'none';
             
             if(uiTimeout) clearTimeout(uiTimeout);
-            setTimeout(nextMove, 600);
+            currentTimerId = setTimeout(nextMove, 600);
         }
 
         // --- UI ---
