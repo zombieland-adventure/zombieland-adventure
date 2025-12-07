@@ -555,7 +555,7 @@
             if (hookCharge.right && vxR > punchThreshold && userRightWrist.y < chargeLevelY) { detectedMove = 'GANCHO'; detectedSide = 'DERECHA'; }
 
             // ESQUIVA
-            if (punchCooldown === 0 && nose.y > (refPoints.shoulderY + 40)) {
+            if (punchCooldown === 0 && nose.y > (refPoints.shoulderY + 60)) { // Umbral ajustado para evitar falsos positivos
                 const centerX = (lS.x + rS.x) / 2;
                 const dx = nose.x - centerX;
                 detectedMove = 'ESQUIVA';
@@ -565,7 +565,9 @@
             }
 
             if (detectedMove) {
-                isHitProcessing = true; 
+                // Aquí ya no bloqueamos antes de comprobar, lo hacemos dentro
+                
+                // Resetear cargas si hubo golpe
                 if (detectedMove === 'JAB' || detectedMove === 'GANCHO') {
                     punchCooldown = 20;
                     if(detectedSide === 'IZQUIERDA') hookCharge.left = false;
@@ -577,6 +579,7 @@
                 if (detectedMove === 'ESQUIVA' && detectedSide === 'CENTRO') isCorrectSide = true;
 
                 if (isCorrectType && isCorrectSide) {
+                    isHitProcessing = true; // Bloquear solo en éxito
                     playTone('hit');
                     score++;
                     streakCount++;
